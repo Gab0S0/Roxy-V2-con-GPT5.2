@@ -131,6 +131,9 @@ backend:
       - working: true
         agent: "main"
         comment: "Integración con OpenAI usando Emergent LLM Key funcionando perfectamente. Roxy interpreta comandos en lenguaje natural y ejecuta acciones (crear/listar alarmas). Testeado con curl exitosamente."
+      - working: true
+        agent: "testing"
+        comment: "TESTING COMPLETADO: Chat con Roxy funcionando perfectamente. Responde en español, interpreta comandos naturales, crea alarmas automáticamente, lista alarmas existentes, maneja mensajes vacíos/largos/sin sentido correctamente. Historial de chat funciona. 8/8 tests pasaron. Minor: Ocasional error de parsing JSON pero se maneja graciosamente."
         
   - task: "Interpretación de comandos con IA"
     implemented: true
