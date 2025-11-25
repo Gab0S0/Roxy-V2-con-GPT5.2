@@ -60,7 +60,7 @@ const scheduleNotification = async (alarma: Alarma): Promise<string | null> => {
     const notificationId = await Notifications.scheduleNotificationAsync({
       content: {
         title: '⏰ ' + alarma.label,
-        body: 'Es hora! No lo patees.',
+        body: alarma.motivationalMessage || '¡Es hora! Estoy contigo, vamos juntas 💙✨',
         sound: true,
         priority: Notifications.AndroidNotificationPriority.MAX,
       },
