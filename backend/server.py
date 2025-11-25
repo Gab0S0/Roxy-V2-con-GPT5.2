@@ -214,7 +214,13 @@ Usa emojis relevantes al final."""
 @api_router.post("/alarmas", response_model=Alarma)
 async def crear_alarma(alarma: AlarmaCreate):
     """Crear una nueva alarma"""
-    alarma_obj = Alarma(**alarma.dict())
+    # Generar mensaje motivacional personalizado
+    motivational_message = await generar_mensaje_motivacional(alarma.label)
+    
+    alarma_obj = Alarma(
+        **alarma.dict(),
+        motivationalMessage=motivational_message
+    )
     await db.alarmas.insert_one(alarma_obj.dict())
     return alarma_obj
 
