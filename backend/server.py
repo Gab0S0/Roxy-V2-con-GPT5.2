@@ -35,6 +35,7 @@ class Alarma(BaseModel):
     repeatDays: Optional[List[str]] = []  # ["monday", "tuesday", etc]
     isActive: bool = True
     sound: Optional[str] = "default"
+    motivationalMessage: Optional[str] = None  # Mensaje personalizado por IA
     createdBy: str = "user"
     createdAt: datetime = Field(default_factory=datetime.utcnow)
 
