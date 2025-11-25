@@ -127,17 +127,19 @@ class GoogleToken(BaseModel):
 
 ## 📋 CHECKLIST DE IMPLEMENTACIÓN
 
-### Prioridad ALTA (Hacer ahora)
-- [ ] Implementar generación de mensajes motivacionales con IA
-- [ ] Actualizar store de alarmas para usar mensajes personalizados
-- [ ] Actualizar notificaciones para mostrar el mensaje personalizado
-- [ ] Probar mensajes para: entrenar, estudiar, trabajar, dormir
+### Prioridad ALTA ✅ COMPLETADO
+- [x] Implementar generación de mensajes motivacionales con IA
+- [x] Actualizar store de alarmas para usar mensajes personalizados
+- [x] Actualizar notificaciones para mostrar el mensaje personalizado
+- [x] Probar mensajes para: entrenar, estudiar, trabajar, dormir
+- [x] **SISTEMA DE RUTINAS IMPLEMENTADO** - Crear y listar rutinas recurrentes
 
 ### Prioridad MEDIA (Después)
 - [ ] Setup OAuth de Google Calendar
 - [ ] Implementar endpoints de calendario
 - [ ] Crear UI para conectar Google Calendar
 - [ ] Implementar sincronización automática
+- [ ] Mejorar manejo de timezone (UTC-3 Argentina)
 
 ### Prioridad BAJA (Futuro)
 - [ ] Soporte para múltiples calendarios
