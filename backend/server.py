@@ -125,7 +125,7 @@ REGLAS IMPORTANTES:
             api_key=api_key,
             session_id=f"roxy_session_{datetime.now().timestamp()}",
             system_message=system_message
-        ).with_model("openai", "gpt-4o-mini")
+        ).with_model("gemini", "gemini-2.0-flash")
         
         user_message = UserMessage(text=mensaje)
         response = await chat.send_message(user_message)
