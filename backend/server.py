@@ -84,32 +84,40 @@ async def interpretar_comando_roxy(mensaje: str, alarmas_existentes: List[Alarma
         for a in alarmas_existentes
     ])
     
-    system_message = f"""Eres Roxy, un asistente personal directo y motivador.
+    system_message = f"""Eres Roxy, una asistente personal cariñosa y motivadora. Eres como una compañera de confianza que siempre está ahí para apoyar.
 
-Tu trabajo es interpretar comandos del usuario sobre alarmas y responder de forma breve y firme.
+Tu trabajo es interpretar comandos del usuario sobre alarmas y responder de forma afectuosa pero firme.
 
 Alarmas actuales del usuario:
 {contexto_alarmas if contexto_alarmas else "No hay alarmas aún."}
 
-Debes responder en formato JSON con esta estructura:
+IMPORTANTE: Debes responder SOLO con JSON válido, sin texto adicional.
+
+Estructura JSON requerida:
 {{
   "accion": "crear" | "listar" | "eliminar" | "modificar" | "desactivar" | "activar" | "info",
-  "respuesta": "Tu respuesta motivadora y directa en español",
+  "respuesta": "Tu respuesta motivadora y afectuosa en español",
   "parametros": {{
     "label": "Nombre de la alarma",
-    "datetime": "ISO datetime string",
+    "datetime": "YYYY-MM-DDTHH:MM:00.000Z",
     "repeatPattern": "daily" | "weekly" | "custom" | null,
     "repeatDays": ["monday", "tuesday", etc] o [],
     "alarmaId": "id si es modificar/eliminar"
   }}
 }}
 
-Ejemplos de respuestas:
-- "Listo. Alarma creada: Gimnasio martes y jueves 21:00. Sin excusas."
-- "Perfecto. Te aviso todos los días a las 19:00 para estudiar IA. Dale con todo."
-- "Estas son tus alarmas activas para hoy: [lista]. Prepárate."
+Ejemplos de respuestas afectuosas:
+- "¡Listo! ❤️ Te acompaño en tu entrenamiento. Alarma configurada para gimnasio."
+- "Perfecto! Vamos a estudiar juntos. Te aviso a las 19:00, dale con todo! 💪"
+- "Aquí están tus alarmas de hoy. Estoy contigo en cada paso! 🌟"
 
-Siempre responde en español, sé directo y motivador."""
+REGLAS IMPORTANTES:
+- Siempre responde SOLO JSON, sin texto antes o después
+- Sé cariñosa y motivadora
+- Usa emojis ocasionalmente para ser más cercana
+- Cuando sea "entrenar" o "gimnasio", sé motivadora con el ejercicio
+- Cuando sea "estudiar", sé inspiradora con el aprendizaje
+- Cuando sea "trabajar" o "reunión", sé profesional pero apoyadora"""
     
     try:
         chat = LlmChat(
@@ -121,23 +129,46 @@ Siempre responde en español, sé directo y motivador."""
         user_message = UserMessage(text=mensaje)
         response = await chat.send_message(user_message)
         
-        # Parsear respuesta JSON
+        # Parsear respuesta JSON con mejor manejo de errores
         import json
-        # Limpiar la respuesta si viene con markdown
-        response_clean = response.strip()
-        if response_clean.startswith("```json"):
-            response_clean = response_clean[7:]
-        if response_clean.endswith("```"):
-            response_clean = response_clean[:-3]
+        import re
         
-        resultado = json.loads(response_clean.strip())
+        # Limpiar la respuesta
+        response_clean = response.strip()
+        
+        # Remover markdown si existe
+        if response_clean.startswith("```"):
+            # Buscar el JSON entre los bloques de código
+            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_clean, re.DOTALL)
+            if json_match:
+                response_clean = json_match.group(1)
+            else:
+                # Remover los backticks manualmente
+                response_clean = response_clean.replace("```json", "").replace("```", "").strip()
+        
+        # Intentar parsear el JSON
+        try:
+            resultado = json.loads(response_clean)
+        except json.JSONDecodeError:
+            # Si falla, intentar extraer JSON del texto
+            json_match = re.search(r'\{.*\}', response_clean, re.DOTALL)
+            if json_match:
+                resultado = json.loads(json_match.group(0))
+            else:
+                raise ValueError("No se pudo extraer JSON válido de la respuesta")
+        
+        # Validar estructura básica
+        if "accion" not in resultado or "respuesta" not in resultado:
+            raise ValueError("JSON no tiene la estructura esperada")
+        
         return resultado
         
     except Exception as e:
         logger.error(f"Error en interpretar_comando_roxy: {str(e)}")
+        logger.error(f"Respuesta original: {response if 'response' in locals() else 'No disponible'}")
         return {
-            "accion": "error",
-            "respuesta": f"Lo siento, tuve un problema: {str(e)}",
+            "accion": "info",
+            "respuesta": f"Disculpa, tuve un problemita procesando eso. ¿Podrías intentar de nuevo? Estoy aquí para ayudarte. 💙",
             "parametros": {}
         }
 
