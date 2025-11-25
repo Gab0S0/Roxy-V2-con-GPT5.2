@@ -94,6 +94,10 @@ curl http://localhost:8001/api/health
 - `POST /api/chat` - Enviar mensaje a Roxy
 - `GET /api/chat/history` - Obtener historial de chat
 
+**Rutinas:**
+- `GET /api/rutinas` - Listar rutinas del usuario
+- `DELETE /api/rutinas/{id}` - Eliminar rutina
+
 ---
 
 ### **2. Frontend (React Native con Expo)**
