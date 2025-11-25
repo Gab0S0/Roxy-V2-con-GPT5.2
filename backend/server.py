@@ -82,6 +82,17 @@ class CalendarEvent(BaseModel):
     createdAt: datetime = Field(default_factory=datetime.utcnow)
     googleEventId: Optional[str] = None  # Para sincronizar con Google Calendar después
 
+class Rutina(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    userId: str = "default_user"
+    nombre: str  # "Gimnasio", "Estudiar", etc
+    descripcion: Optional[str] = None  # "Día de pierna", "Estudiar IA", etc
+    dias: List[str]  # ["monday", "thursday"] 
+    hora: str  # "21:00"
+    activa: bool = True
+    tipoEjercicio: Optional[str] = None  # "pierna", "pecho", "espalda" para gym
+    createdAt: datetime = Field(default_factory=datetime.utcnow)
+
 # ============== HELPER FUNCTIONS ==============
 
 async def interpretar_comando_roxy(mensaje: str, alarmas_existentes: List[Alarma]) -> Dict:
