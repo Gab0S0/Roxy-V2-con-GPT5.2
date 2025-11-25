@@ -219,16 +219,26 @@ function AlarmModal({ visible, alarm, onClose }) {
   };
 
   const onDateChange = (event, date) => {
-    setShowDatePicker(Platform.OS === 'ios');
-    if (date) {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+    if (date && event.type !== 'dismissed') {
       setSelectedDate(date);
+    }
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
     }
   };
 
   const onTimeChange = (event, time) => {
-    setShowTimePicker(Platform.OS === 'ios');
-    if (time) {
+    if (Platform.OS === 'android') {
+      setShowTimePicker(false);
+    }
+    if (time && event.type !== 'dismissed') {
       setSelectedTime(time);
+    }
+    if (Platform.OS === 'android') {
+      setShowTimePicker(false);
     }
   };
 
