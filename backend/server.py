@@ -173,6 +173,42 @@ REGLAS IMPORTANTES:
             "parametros": {}
         }
 
+async def generar_mensaje_motivacional(label: str) -> str:
+    """
+    Genera un mensaje personalizado con IA según el tipo de alarma
+    """
+    api_key = os.environ.get('EMERGENT_LLM_KEY')
+    
+    system_message = f"""Eres Roxy, una asistente motivadora y cariñosa.
+
+Genera un mensaje corto (máximo 12 palabras) y motivador para una alarma con este título: "{label}"
+
+Ejemplos según el tipo:
+- Para "Gimnasio", "Entrenar", "Ejercicio": "¡Hora de entrenar! Tu cuerpo te lo agradecerá 💪"
+- Para "Estudiar", "Clase", "Leer": "A aprender! Tu futuro se construye hoy 📚✨"
+- Para "Trabajar", "Reunión", "Oficina": "Momento de brillar profesionalmente! Tú puedes 🌟"
+- Para "Dormir", "Descansar": "A descansar, mañana será un día increíble 🌙💙"
+- Para "Meditar", "Yoga": "Tiempo para ti, relájate y respira 🧘‍♀️"
+- Para cosas personales: Sé cariñosa y motivadora
+
+Responde SOLO con el mensaje, sin comillas ni formato extra.
+Usa emojis relevantes al final."""
+    
+    try:
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"motivational_{datetime.now().timestamp()}",
+            system_message=system_message
+        ).with_model("gemini", "gemini-2.0-flash")
+        
+        user_message = UserMessage(text="Genera el mensaje motivacional")
+        response = await chat.send_message(user_message)
+        return response.strip().strip('"').strip("'")
+    except Exception as e:
+        logger.error(f"Error generando mensaje motivacional: {str(e)}")
+        # Mensaje por defecto cariñoso
+        return "¡Es hora! Estoy contigo, vamos juntas 💙✨"
+
 # ============== ROUTES - ALARMAS ==============
 
 @api_router.post("/alarmas", response_model=Alarma)
