@@ -398,6 +398,8 @@ async def chat_con_roxy(request: ChatRequest):
             
         elif accion == "crear_rutina":
             # Crear rutina recurrente
+            from datetime import timedelta
+            
             dias = parametros.get("repeatDays", [])
             hora = parametros.get("hora", "21:00")
             
@@ -414,7 +416,6 @@ async def chat_con_roxy(request: ChatRequest):
             
             # Crear alarma recurrente para esta rutina
             # Calcular datetime para el próximo día de la rutina
-            import calendar
             
             # Mapeo de días
             day_map = {
