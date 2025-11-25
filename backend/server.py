@@ -161,7 +161,14 @@ CRÍTICO SOBRE HORARIOS:
 - Cuando diga una hora, NO la modifiques. Si dice "12:46" es las 12:46 de su zona horaria
 - El formato datetime debe ser: "YYYY-MM-DDTHH:MM:00.000Z" pero calculando UTC desde Argentina
 - Ejemplo: Si dice "mañana a las 14:00" y es 21 de julio, usa "2025-07-21T17:00:00.000Z" (14:00 ARG = 17:00 UTC)
-- Si solo dice "mañana" sin hora, usa las 09:00 local (12:00 UTC)"""
+- Si solo dice "mañana" sin hora, usa las 09:00 local (12:00 UTC)
+
+SISTEMA DE RUTINAS (NUEVO):
+- Si el usuario dice "jueves hago pierna a las 21" o "los martes entreno pecho", usa accion="crear_rutina"
+- Las rutinas son alarmas recurrentes automáticas que se crean semanalmente
+- Ejemplo: "Jueves es día de pierna a las 21" → crear_rutina con repeatDays=["thursday"], hora="21:00", tipoEjercicio="pierna"
+- Cuando el usuario pregunte "¿qué rutinas tengo?" o "muéstrame mis rutinas", usa accion="ver_rutinas"
+- Las rutinas se pueden ver y modificar en el chat"""
     
     try:
         chat = LlmChat(
