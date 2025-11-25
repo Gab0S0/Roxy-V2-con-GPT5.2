@@ -142,8 +142,10 @@ export default function AlarmScreen() {
 function AlarmModal({ visible, alarm, onClose }) {
   const { createAlarma, updateAlarma } = useAlarmasStore();
   const [label, setLabel] = useState('');
-  const [time, setTime] = useState('08:00');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedTime, setSelectedTime] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const [repeatPattern, setRepeatPattern] = useState('none');
   const [repeatDays, setRepeatDays] = useState([]);
 
