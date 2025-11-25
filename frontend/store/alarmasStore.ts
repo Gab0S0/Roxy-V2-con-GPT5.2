@@ -14,6 +14,7 @@ interface Alarma {
   repeatDays?: string[];
   isActive: boolean;
   sound?: string;
+  motivationalMessage?: string;
   notificationId?: string;
 }
 
