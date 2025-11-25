@@ -119,17 +119,20 @@ IMPORTANTE: Debes responder SOLO con JSON válido, sin texto adicional.
 
 Estructura JSON requerida:
 {{
-  "accion": "crear" | "listar" | "eliminar" | "modificar" | "desactivar" | "activar" | "info" | "crear_evento",
+  "accion": "crear" | "listar" | "eliminar" | "modificar" | "desactivar" | "activar" | "info" | "crear_evento" | "crear_rutina" | "ver_rutinas",
   "respuesta": "Tu respuesta motivadora y afectuosa en español",
   "parametros": {{
-    "label": "Nombre de la alarma/evento",
+    "label": "Nombre de la alarma/evento/rutina",
     "datetime": "YYYY-MM-DDTHH:MM:00.000Z",
     "repeatPattern": "daily" | "weekly" | "custom" | null,
     "repeatDays": ["monday", "tuesday", etc] o [],
     "alarmaId": "id si es modificar/eliminar",
     "esEvento": false,
     "duracionMinutos": 60,
-    "reminderMinutes": 30
+    "reminderMinutes": 30,
+    "esRutina": false,
+    "tipoEjercicio": "pierna" | "pecho" | "espalda" | "brazo" | null,
+    "descripcionRutina": "Detalles de la rutina"
   }}
 }}
 
