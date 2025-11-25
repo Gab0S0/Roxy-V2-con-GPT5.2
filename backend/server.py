@@ -103,14 +103,17 @@ IMPORTANTE: Debes responder SOLO con JSON válido, sin texto adicional.
 
 Estructura JSON requerida:
 {{
-  "accion": "crear" | "listar" | "eliminar" | "modificar" | "desactivar" | "activar" | "info",
+  "accion": "crear" | "listar" | "eliminar" | "modificar" | "desactivar" | "activar" | "info" | "crear_evento",
   "respuesta": "Tu respuesta motivadora y afectuosa en español",
   "parametros": {{
-    "label": "Nombre de la alarma",
+    "label": "Nombre de la alarma/evento",
     "datetime": "YYYY-MM-DDTHH:MM:00.000Z",
     "repeatPattern": "daily" | "weekly" | "custom" | null,
     "repeatDays": ["monday", "tuesday", etc] o [],
-    "alarmaId": "id si es modificar/eliminar"
+    "alarmaId": "id si es modificar/eliminar",
+    "esEvento": false,
+    "duracionMinutos": 60,
+    "reminderMinutes": 30
   }}
 }}
 
