@@ -232,3 +232,5 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: "MVP básico de Roxy implementado. Backend funcionando perfectamente con OpenAI. Frontend con UI hermosa implementada. Necesita testing completo de funcionalidades frontend y testing en dispositivo móvil real para notificaciones."
+  - agent: "testing"
+    message: "BACKEND TESTING COMPLETADO - Todos los APIs funcionando perfectamente. Testeado CRUD de alarmas, chat con Roxy, interpretación de comandos en español, manejo de errores. 23/23 tests pasaron (100% éxito). Backend listo para producción."
