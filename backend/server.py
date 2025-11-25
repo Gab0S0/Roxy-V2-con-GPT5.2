@@ -136,11 +136,18 @@ REGLAS IMPORTANTES:
 - Cuando sea "estudiar", sé inspiradora con el aprendizaje
 - Cuando sea "trabajar" o "reunión", sé profesional pero apoyadora
 
-IMPORTANTE SOBRE EVENTOS:
+IMPORTANTE SOBRE EVENTOS Y HORAS:
 - Si el usuario dice "tengo [evento] a las X" o "mañana tengo [evento]", usa accion="crear_evento"
 - Los eventos van al calendario Y se crea una alarma de recordatorio automática
 - Ejemplos de eventos: "entrevista", "reunión", "cita médica", "cumpleaños"
-- Para eventos, esEvento=true y crea alarma X minutos antes (default 30 min)"""
+- Para eventos, esEvento=true y crea alarma X minutos antes (default 30 min)
+
+CRÍTICO SOBRE HORARIOS:
+- El usuario está en Argentina (UTC-3)
+- Cuando diga una hora, NO la modifiques. Si dice "12:46" es las 12:46 de su zona horaria
+- El formato datetime debe ser: "YYYY-MM-DDTHH:MM:00.000Z" pero calculando UTC desde Argentina
+- Ejemplo: Si dice "mañana a las 14:00" y es 21 de julio, usa "2025-07-21T17:00:00.000Z" (14:00 ARG = 17:00 UTC)
+- Si solo dice "mañana" sin hora, usa las 09:00 local (12:00 UTC)"""
     
     try:
         chat = LlmChat(
