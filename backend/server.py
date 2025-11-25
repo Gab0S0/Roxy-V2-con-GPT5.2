@@ -537,6 +537,35 @@ async def obtener_historial_chat(userId: str = "default_user", limit: int = 50):
     
     return [ChatMessage(**msg) for msg in mensajes]
 
+# ============== ROUTES - RUTINAS ==============
+
+@api_router.get("/rutinas")
+async def obtener_rutinas(userId: str = "default_user"):
+    """Obtener todas las rutinas del usuario"""
+    rutinas = await db.rutinas.find({"userId": userId}).to_list(100)
+    return [Rutina(**r) for r in rutinas]
+
+@api_router.delete("/rutinas/{rutina_id}")
+async def eliminar_rutina(rutina_id: str):
+    """Eliminar una rutina y su alarma asociada"""
+    rutina = await db.rutinas.find_one({"id": rutina_id})
+    if not rutina:
+        raise HTTPException(status_code=404, detail="Rutina no encontrada")
+    
+    # Eliminar alarma asociada si existe
+    if rutina.get("alarmaId"):
+        try:
+            await eliminar_alarma(rutina["alarmaId"])
+        except:
+            pass  # Si la alarma no existe, continuar
+    
+    # Eliminar rutina
+    result = await db.rutinas.delete_one({"id": rutina_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Rutina no encontrada")
+    
+    return {"message": "Rutina eliminada exitosamente"}
+
 # ============== BASIC ROUTES ==============
 
 @api_router.get("/")
