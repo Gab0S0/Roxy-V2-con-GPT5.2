@@ -320,6 +320,54 @@ async def chat_con_roxy(request: ChatRequest):
                 "alarma": alarma_creada.dict()
             })
             
+        elif accion == "crear_evento":
+            # Crear evento en calendario + alarma de recordatorio
+            from datetime import timedelta
+            
+            start_time = parametros.get("datetime")
+            duracion = parametros.get("duracionMinutos", 60)
+            reminder_min = parametros.get("reminderMinutes", 30)
+            
+            # Calcular hora de fin del evento
+            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            end_dt = start_dt + timedelta(minutes=duracion)
+            
+            # Crear evento en "calendario" (MongoDB por ahora)
+            evento = CalendarEvent(
+                userId=request.userId,
+                summary=parametros.get("label", "Evento"),
+                description=f"Evento creado por Roxy",
+                start_datetime=start_time,
+                end_datetime=end_dt.isoformat(),
+                reminder_minutes=reminder_min
+            )
+            await db.calendar_events.insert_one(evento.dict())
+            
+            # Crear alarma de recordatorio X minutos antes
+            reminder_dt = start_dt - timedelta(minutes=reminder_min)
+            reminder_label = f"📅 {parametros.get('label', 'Evento')}"
+            
+            nueva_alarma = AlarmaCreate(
+                label=reminder_label,
+                datetime=reminder_dt.isoformat(),
+                repeatPattern=None,
+                repeatDays=[],
+                sound="default"
+            )
+            alarma_creada = await crear_alarma(nueva_alarma)
+            
+            # Actualizar evento con ID de alarma
+            await db.calendar_events.update_one(
+                {"id": evento.id},
+                {"$set": {"alarmaId": alarma_creada.id}}
+            )
+            
+            acciones_realizadas.append({
+                "tipo": "evento_creado",
+                "evento": evento.dict(),
+                "alarma": alarma_creada.dict()
+            })
+            
         elif accion == "eliminar":
             alarma_id = parametros.get("alarmaId")
             if alarma_id:
