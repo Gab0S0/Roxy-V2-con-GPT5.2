@@ -70,6 +70,13 @@ class ChatResponse(BaseModel):
     response: str
     actions: List[Dict] = []
 
+class GoogleCalendarEvent(BaseModel):
+    summary: str  # Título del evento
+    description: Optional[str] = None
+    start_datetime: str  # ISO format
+    end_datetime: Optional[str] = None
+    reminder_minutes: int = 30  # Minutos antes para recordar
+
 # ============== HELPER FUNCTIONS ==============
 
 async def interpretar_comando_roxy(mensaje: str, alarmas_existentes: List[Alarma]) -> Dict:
