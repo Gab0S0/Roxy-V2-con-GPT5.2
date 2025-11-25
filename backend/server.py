@@ -70,12 +70,17 @@ class ChatResponse(BaseModel):
     response: str
     actions: List[Dict] = []
 
-class GoogleCalendarEvent(BaseModel):
+class CalendarEvent(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    userId: str = "default_user"
     summary: str  # Título del evento
     description: Optional[str] = None
     start_datetime: str  # ISO format
-    end_datetime: Optional[str] = None
+    end_datetime: str  # ISO format
     reminder_minutes: int = 30  # Minutos antes para recordar
+    alarmaId: Optional[str] = None  # ID de la alarma asociada
+    createdAt: datetime = Field(default_factory=datetime.utcnow)
+    googleEventId: Optional[str] = None  # Para sincronizar con Google Calendar después
 
 # ============== HELPER FUNCTIONS ==============
 
