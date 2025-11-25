@@ -466,7 +466,14 @@ async def chat_con_roxy(request: ChatRequest):
             
         elif accion == "ver_rutinas":
             # Listar rutinas del usuario
-            rutinas = await db.rutinas.find({"userId": request.userId}).to_list(100)
+            rutinas_raw = await db.rutinas.find({"userId": request.userId}).to_list(100)
+            
+            # Convertir ObjectId a string y limpiar
+            rutinas = []
+            for r in rutinas_raw:
+                if '_id' in r:
+                    del r['_id']  # Remover ObjectId de MongoDB
+                rutinas.append(r)
             
             # Formatear respuesta con las rutinas
             if rutinas:
