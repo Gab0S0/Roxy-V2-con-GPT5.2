@@ -14,8 +14,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, addDays } from 'date-fns';
 import { es } from 'date-fns/locale';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import useAlarmasStore from '../../store/alarmasStore';
 
 export default function AlarmScreen() {
@@ -30,7 +31,7 @@ export default function AlarmScreen() {
   const handleDeleteAlarm = async (id: string) => {
     Alert.alert(
       'Eliminar Alarma',
-      '¿Estás seguro de que quieres eliminar esta alarma?',
+      '¿Estás segura de que quieres eliminar esta alarma?',
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -104,7 +105,7 @@ export default function AlarmScreen() {
             <Ionicons name="alarm-outline" size={80} color="#3A3A3C" />
             <Text style={styles.emptyText}>No hay alarmas configuradas</Text>
             <Text style={styles.emptySubtext}>
-              Crea una alarma o habla con Roxy para configurarlas
+              Crea una alarma o habla con Roxy para configurarlas 💙
             </Text>
           </View>
         ) : (
@@ -163,14 +164,14 @@ function AlarmModal({ visible, alarm, onClose }) {
     if (alarm) {
       setLabel(alarm.label);
       const dateObj = parseISO(alarm.datetime);
-      setTime(format(dateObj, 'HH:mm'));
-      setDate(format(dateObj, 'yyyy-MM-dd'));
+      setSelectedDate(dateObj);
+      setSelectedTime(dateObj);
       setRepeatPattern(alarm.repeatPattern || 'none');
       setRepeatDays(alarm.repeatDays || []);
     } else {
       setLabel('');
-      setTime('08:00');
-      setDate(new Date().toISOString().split('T')[0]);
+      setSelectedDate(new Date());
+      setSelectedTime(new Date());
       setRepeatPattern('none');
       setRepeatDays([]);
     }
@@ -182,7 +183,15 @@ function AlarmModal({ visible, alarm, onClose }) {
       return;
     }
 
-    const datetime = `${date}T${time}:00.000Z`;
+    // Combinar fecha y hora
+    const year = selectedDate.getFullYear();
+    const month = selectedDate.getMonth();
+    const day = selectedDate.getDate();
+    const hours = selectedTime.getHours();
+    const minutes = selectedTime.getMinutes();
+
+    const combinedDate = new Date(year, month, day, hours, minutes);
+    const datetime = combinedDate.toISOString();
 
     const alarmData = {
       label: label.trim(),
@@ -206,6 +215,20 @@ function AlarmModal({ visible, alarm, onClose }) {
       setRepeatDays(repeatDays.filter((d) => d !== dayId));
     } else {
       setRepeatDays([...repeatDays, dayId]);
+    }
+  };
+
+  const onDateChange = (event, date) => {
+    setShowDatePicker(Platform.OS === 'ios');
+    if (date) {
+      setSelectedDate(date);
+    }
+  };
+
+  const onTimeChange = (event, time) => {
+    setShowTimePicker(Platform.OS === 'ios');
+    if (time) {
+      setSelectedTime(time);
     }
   };
 
@@ -233,28 +256,51 @@ function AlarmModal({ visible, alarm, onClose }) {
               style={styles.input}
               value={label}
               onChangeText={setLabel}
-              placeholder="Ej: Gimnasio, Estudiar IA"
+              placeholder="Ej: Gimnasio, Estudiar, Reunión"
               placeholderTextColor="#3A3A3C"
             />
 
             <Text style={styles.inputLabel}>Hora</Text>
-            <TextInput
-              style={styles.input}
-              value={time}
-              onChangeText={setTime}
-              placeholder="08:00"
-              placeholderTextColor="#3A3A3C"
-              keyboardType="numeric"
-            />
+            <TouchableOpacity
+              style={styles.pickerButton}
+              onPress={() => setShowTimePicker(true)}
+            >
+              <Ionicons name="time-outline" size={20} color="#4A90E2" />
+              <Text style={styles.pickerButtonText}>
+                {format(selectedTime, 'HH:mm')}
+              </Text>
+            </TouchableOpacity>
+
+            {showTimePicker && (
+              <DateTimePicker
+                value={selectedTime}
+                mode="time"
+                is24Hour={true}
+                display="default"
+                onChange={onTimeChange}
+              />
+            )}
 
             <Text style={styles.inputLabel}>Fecha</Text>
-            <TextInput
-              style={styles.input}
-              value={date}
-              onChangeText={setDate}
-              placeholder="2025-01-15"
-              placeholderTextColor="#3A3A3C"
-            />
+            <TouchableOpacity
+              style={styles.pickerButton}
+              onPress={() => setShowDatePicker(true)}
+            >
+              <Ionicons name="calendar-outline" size={20} color="#4A90E2" />
+              <Text style={styles.pickerButtonText}>
+                {format(selectedDate, 'dd MMM yyyy', { locale: es })}
+              </Text>
+            </TouchableOpacity>
+
+            {showDatePicker && (
+              <DateTimePicker
+                value={selectedDate}
+                mode="date"
+                display="default"
+                onChange={onDateChange}
+                minimumDate={new Date()}
+              />
+            )}
 
             <Text style={styles.inputLabel}>Repetir</Text>
             <View style={styles.repeatOptions}>
@@ -463,6 +509,20 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#3A3A3C',
+  },
+  pickerButton: {
+    backgroundColor: '#2C2C2E',
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#3A3A3C',
+  },
+  pickerButtonText: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    marginLeft: 12,
   },
   repeatOptions: {
     flexDirection: 'row',
