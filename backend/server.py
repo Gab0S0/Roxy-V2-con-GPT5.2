@@ -396,6 +396,90 @@ async def chat_con_roxy(request: ChatRequest):
                 "alarma": alarma_creada.dict()
             })
             
+        elif accion == "crear_rutina":
+            # Crear rutina recurrente
+            dias = parametros.get("repeatDays", [])
+            hora = parametros.get("hora", "21:00")
+            
+            rutina = Rutina(
+                userId=request.userId,
+                nombre=parametros.get("label", "Rutina"),
+                descripcion=parametros.get("descripcionRutina", ""),
+                dias=dias,
+                hora=hora,
+                tipoEjercicio=parametros.get("tipoEjercicio"),
+                activa=True
+            )
+            await db.rutinas.insert_one(rutina.dict())
+            
+            # Crear alarma recurrente para esta rutina
+            # Calcular datetime para el próximo día de la rutina
+            import calendar
+            
+            # Mapeo de días
+            day_map = {
+                "monday": 0, "tuesday": 1, "wednesday": 2,
+                "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6
+            }
+            
+            # Encontrar el próximo día de la rutina
+            today = datetime.now()
+            current_weekday = today.weekday()
+            
+            min_days_ahead = 7
+            for dia_str in dias:
+                target_day = day_map.get(dia_str, 0)
+                days_ahead = (target_day - current_weekday) % 7
+                if days_ahead == 0:
+                    days_ahead = 7  # Si es hoy, programar para la próxima semana
+                min_days_ahead = min(min_days_ahead, days_ahead)
+            
+            # Calcular fecha y hora de la próxima alarma
+            next_date = today + timedelta(days=min_days_ahead)
+            hora_parts = hora.split(":")
+            next_date = next_date.replace(hour=int(hora_parts[0]), minute=int(hora_parts[1]), second=0, microsecond=0)
+            
+            # Ajustar a UTC (Argentina es UTC-3)
+            next_date_utc = next_date + timedelta(hours=3)
+            
+            nueva_alarma = AlarmaCreate(
+                label=f"🏋️ {rutina.nombre}",
+                datetime=next_date_utc.isoformat(),
+                repeatPattern="custom",
+                repeatDays=dias,
+                sound="default"
+            )
+            alarma_creada = await crear_alarma(nueva_alarma)
+            
+            # Actualizar rutina con ID de alarma
+            await db.rutinas.update_one(
+                {"id": rutina.id},
+                {"$set": {"alarmaId": alarma_creada.id}}
+            )
+            
+            acciones_realizadas.append({
+                "tipo": "rutina_creada",
+                "rutina": rutina.dict(),
+                "alarma": alarma_creada.dict()
+            })
+            
+        elif accion == "ver_rutinas":
+            # Listar rutinas del usuario
+            rutinas = await db.rutinas.find({"userId": request.userId}).to_list(100)
+            
+            # Formatear respuesta con las rutinas
+            if rutinas:
+                rutinas_texto = "\n".join([
+                    f"- {r.get('nombre', 'Rutina')} ({', '.join(r.get('dias', []))}) a las {r.get('hora', '00:00')}"
+                    for r in rutinas
+                ])
+                resultado["respuesta"] = f"Aquí están tus rutinas activas:\n{rutinas_texto}"
+            
+            acciones_realizadas.append({
+                "tipo": "listar_rutinas",
+                "rutinas": rutinas
+            })
+            
         elif accion == "eliminar":
             alarma_id = parametros.get("alarmaId")
             if alarma_id:
