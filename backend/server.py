@@ -209,7 +209,121 @@ class Rutina(BaseModel):
 
 # ============== HELPER FUNCTIONS ==============
 
-async def interpretar_comando_roxy(mensaje: str, alarmas_existentes: List[Alarma]) -> Dict:
+async def interpretar_comando_roxy(mensaje: str, alarmas_existentes: List[Alarma]) -> LlmResult:
+    """
+    Usa Gemini para interpretar comandos en lenguaje natural
+    y determinar qué acción tomar con las alarmas.
+    Retorna LlmResult validado con Pydantic.
+    """
+    api_key = os.environ.get('EMERGENT_LLM_KEY')
+    
+    # Construir contexto con alarmas existentes
+    contexto_alarmas = "\n".join([
+        f"- {a.label}: {a.datetime} (Activa: {a.isActive}, Repetir: {a.repeatPattern})" 
+        for a in alarmas_existentes
+    ])
+    
+    system_message = f"""Eres Roxy, una asistente personal cariñosa y motivadora en Argentina.
+
+Tu trabajo es interpretar comandos del usuario sobre alarmas y responder de forma afectuosa.
+
+Alarmas actuales del usuario:
+{contexto_alarmas if contexto_alarmas else "No hay alarmas aún."}
+
+IMPORTANTE: Responde SOLO con JSON válido, sin texto adicional.
+
+Estructura JSON requerida:
+{{
+  "accion": "crear" | "listar" | "eliminar" | "modificar" | "desactivar" | "activar" | "info" | "crear_evento" | "crear_rutina" | "ver_rutinas",
+  "respuesta": "Tu respuesta motivadora en español",
+  "parametros": {{
+    "label": "Nombre de la alarma/evento/rutina",
+    "date": "YYYY-MM-DD",
+    "time": "HH:MM",
+    "repeatPattern": "daily" | "weekly" | "custom" | null,
+    "repeatDays": ["monday", "tuesday", etc],
+    "alarmaId": "id si es modificar/eliminar",
+    "hora": "HH:MM",
+    "duracionMinutos": 60,
+    "reminderMinutes": 30,
+    "tipoEjercicio": "pierna" | "pecho" | "espalda" | null,
+    "descripcionRutina": "Detalles"
+  }}
+}}
+
+CRÍTICO - FECHAS Y HORAS:
+- El usuario está en Argentina (UTC-3)
+- SIEMPRE devuelve date y time por separado cuando sea posible
+- Formato date: "YYYY-MM-DD" (ej: "2025-12-05")
+- Formato time: "HH:MM" (ej: "21:00" para las 9 PM)
+- Si dice "mañana a las 14", devuelve date=mañana, time="14:00"
+- Si dice "hoy a las 10:30", devuelve date=hoy, time="10:30"
+- NO hagas conversiones de timezone, el backend lo maneja
+
+REGLAS:
+- Sé cariñosa y motivadora
+- Usa emojis ocasionalmente
+- Para eventos (entrevista, reunión, cita): usa accion="crear_evento"
+- Para rutinas recurrentes: usa accion="crear_rutina"
+- Si pide eliminar pero no especifica cuál: accion="info" y pide aclaración
+
+Ejemplos:
+- "Crea alarma mañana a las 14" → {{"accion":"crear", "parametros":{{"label":"Alarma", "date":"2025-12-06", "time":"14:00"}}}}
+- "Rutina gym martes y jueves 21" → {{"accion":"crear_rutina", "parametros":{{"label":"Gym", "repeatDays":["tuesday","thursday"], "hora":"21:00"}}}}"""
+    
+    try:
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"roxy_session_{datetime.now().timestamp()}",
+            system_message=system_message
+        ).with_model("gemini", "gemini-2.0-flash")
+        
+        user_message = UserMessage(text=mensaje)
+        response = await chat.send_message(user_message)
+        
+        # Parsear respuesta JSON
+        import json
+        import re
+        
+        response_clean = response.strip()
+        
+        # Remover markdown si existe
+        if response_clean.startswith("```"):
+            json_match = re.search(r'```(?:json)?\s*(\{{.*?\}})\s*```', response_clean, re.DOTALL)
+            if json_match:
+                response_clean = json_match.group(1)
+            else:
+                response_clean = response_clean.replace("```json", "").replace("```", "").strip()
+        
+        # Intentar parsear el JSON
+        try:
+            resultado_dict = json.loads(response_clean)
+        except json.JSONDecodeError:
+            json_match = re.search(r'\{{.*\}}', response_clean, re.DOTALL)
+            if json_match:
+                resultado_dict = json.loads(json_match.group(0))
+            else:
+                raise ValueError("No se pudo extraer JSON válido")
+        
+        # Validar con Pydantic
+        resultado = LlmResult.model_validate(resultado_dict)
+        return resultado
+        
+    except ValidationError as e:
+        logger.error(f"Error de validación Pydantic: {str(e)}")
+        return LlmResult(
+            accion="info",
+            respuesta="No entendí bien lo que dijiste. ¿Podrías repetirlo de otra forma? 💙",
+            parametros=LlmParams()
+        )
+    except Exception as e:
+        logger.error(f"Error en interpretar_comando_roxy: {str(e)}")
+        logger.error(f"Respuesta original: {response if 'response' in locals() else 'No disponible'}")
+        return LlmResult(
+            accion="info",
+            respuesta=f"Disculpa, tuve un problemita. ¿Intentamos de nuevo? Estoy aquí para ti. 💙",
+            parametros=LlmParams()
+        )
     """
     Usa OpenAI para interpretar comandos en lenguaje natural
     y determinar qué acción tomar con las alarmas
