@@ -5,16 +5,130 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from typing import List, Optional, Dict
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
+# ============== TIMEZONE HELPERS ==============
+
+ARGENTINA_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
+UTC_TZ = ZoneInfo("UTC")
+
+def normalize_to_utc_iso_z(dt_str: str) -> str:
+    """
+    Convierte cualquier datetime string a UTC ISO con Z
+    - Si viene con Z o +00:00 → ya es UTC
+    - Si viene sin timezone → asume Argentina y convierte a UTC
+    """
+    if not dt_str:
+        return datetime.now(UTC_TZ).isoformat().replace('+00:00', 'Z')
+    
+    try:
+        # Intentar parsear con timezone
+        if dt_str.endswith('Z'):
+            dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+        elif '+' in dt_str or dt_str.count('-') > 2:  # Tiene timezone
+            dt = datetime.fromisoformat(dt_str)
+        else:
+            # Sin timezone, asumir Argentina
+            dt = datetime.fromisoformat(dt_str)
+            dt = dt.replace(tzinfo=ARGENTINA_TZ)
+        
+        # Convertir a UTC
+        dt_utc = dt.astimezone(UTC_TZ)
+        return dt_utc.isoformat().replace('+00:00', 'Z')
+    
+    except Exception as e:
+        logger.error(f"Error normalizando datetime: {dt_str} - {str(e)}")
+        return datetime.now(UTC_TZ).isoformat().replace('+00:00', 'Z')
+
+def next_occurrence_utc_iso_z(repeat_days: List[str], hora_hhmm: str) -> str:
+    """
+    Calcula la próxima ocurrencia de una rutina en hora local Argentina
+    y la convierte a UTC ISO con Z
+    
+    Args:
+        repeat_days: ["monday", "thursday", etc]
+        hora_hhmm: "21:00"
+    
+    Returns:
+        ISO string en UTC con Z
+    """
+    day_map = {
+        "monday": 0, "tuesday": 1, "wednesday": 2,
+        "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6
+    }
+    
+    # Obtener fecha/hora actual en Argentina
+    now_arg = datetime.now(ARGENTINA_TZ)
+    current_weekday = now_arg.weekday()
+    
+    # Parsear hora
+    try:
+        hora_parts = hora_hhmm.split(":")
+        target_hour = int(hora_parts[0])
+        target_minute = int(hora_parts[1])
+    except:
+        target_hour = 21
+        target_minute = 0
+    
+    # Encontrar el próximo día de la rutina
+    min_days_ahead = 7
+    for dia_str in repeat_days:
+        target_day = day_map.get(dia_str, 0)
+        days_ahead = (target_day - current_weekday) % 7
+        
+        # Si es hoy, verificar si ya pasó la hora
+        if days_ahead == 0:
+            today_target = now_arg.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+            if now_arg >= today_target:
+                days_ahead = 7  # Ya pasó, programar para la próxima semana
+        
+        min_days_ahead = min(min_days_ahead, days_ahead)
+    
+    # Calcular próxima fecha en Argentina
+    next_date_arg = now_arg + timedelta(days=min_days_ahead)
+    next_date_arg = next_date_arg.replace(
+        hour=target_hour,
+        minute=target_minute,
+        second=0,
+        microsecond=0
+    )
+    
+    # Convertir a UTC
+    next_date_utc = next_date_arg.astimezone(UTC_TZ)
+    return next_date_utc.isoformat().replace('+00:00', 'Z')
+
+# ============== PYDANTIC MODELS FOR LLM VALIDATION ==============
+
+class LlmParams(BaseModel):
+    """Parámetros validados de la respuesta del LLM"""
+    label: Optional[str] = None
+    date: Optional[str] = None  # YYYY-MM-DD (fecha local)
+    time: Optional[str] = None  # HH:MM (hora local)
+    datetime: Optional[str] = None  # Fallback ISO
+    repeatPattern: Optional[str] = None
+    repeatDays: Optional[List[str]] = []
+    alarmaId: Optional[str] = None
+    hora: Optional[str] = None  # Para rutinas
+    duracionMinutos: Optional[int] = 60
+    reminderMinutes: Optional[int] = 30
+    tipoEjercicio: Optional[str] = None
+    descripcionRutina: Optional[str] = None
+
+class LlmResult(BaseModel):
+    """Resultado validado de la respuesta del LLM"""
+    accion: str
+    respuesta: str
+    parametros: LlmParams = Field(default_factory=LlmParams)
+
+# ============== MONGODB CONNECTION ==============
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
