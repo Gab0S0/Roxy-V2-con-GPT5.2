@@ -545,30 +545,46 @@ async def eliminar_alarma(alarma_id: str):
 
 @api_router.post("/chat", response_model=ChatResponse)
 async def chat_con_roxy(request: ChatRequest):
-    """Procesar un mensaje del usuario y ejecutar acciones"""
+    """Procesar un mensaje del usuario y ejecutar acciones - CON MULTIUSUARIO"""
     
-    # Obtener alarmas existentes para contexto
-    alarmas = await db.alarmas.find().to_list(1000)
+    # ✅ MULTIUSUARIO: Obtener alarmas solo de este usuario
+    alarmas = await db.alarmas.find({"userId": request.userId}).to_list(1000)
     alarmas_obj = [Alarma(**a) for a in alarmas]
     
-    # Interpretar comando con OpenAI
+    # Interpretar comando con Gemini (retorna LlmResult validado)
     resultado = await interpretar_comando_roxy(request.message, alarmas_obj)
     
     acciones_realizadas = []
     
     # Ejecutar acción según lo interpretado
-    accion = resultado.get("accion", "info")
-    parametros = resultado.get("parametros", {})
+    accion = resultado.accion
+    params = resultado.parametros
+    
+    # Helper para construir datetime desde date + time
+    def build_datetime_utc() -> str:
+        """Construye datetime UTC desde date y time del LLM"""
+        if params.date and params.time:
+            # Tenemos date y time separados (preferido)
+            dt_str_local = f"{params.date}T{params.time}:00"
+            return normalize_to_utc_iso_z(dt_str_local)
+        elif params.datetime:
+            # Fallback: datetime completo
+            return normalize_to_utc_iso_z(params.datetime)
+        else:
+            # Sin info, usar ahora
+            return normalize_to_utc_iso_z(datetime.now().isoformat())
     
     try:
         if accion == "crear":
-            # Crear nueva alarma
+            # Crear nueva alarma con timezone correcto
+            datetime_utc = build_datetime_utc()
+            
             nueva_alarma = AlarmaCreate(
-                label=parametros.get("label", "Alarma"),
-                datetime=parametros.get("datetime"),
-                repeatPattern=parametros.get("repeatPattern"),
-                repeatDays=parametros.get("repeatDays", []),
-                sound=parametros.get("sound", "default")
+                label=params.label or "Alarma",
+                datetime=datetime_utc,
+                repeatPattern=params.repeatPattern,
+                repeatDays=params.repeatDays or [],
+                sound="default"
             )
             alarma_creada = await crear_alarma(nueva_alarma)
             acciones_realizadas.append({
