@@ -38,10 +38,16 @@ const useRoxyStore = create<RoxyState>((set, get) => ({
 
     try {
       const userId = await getUserId();
-      const response = await axios.post(`${API_URL}/api/chat`, {
+      const url = `${API_URL}/api/chat`;
+      
+      console.log('🔵 [ROXY] Enviando mensaje:', { url, userId, message });
+      
+      const response = await axios.post(url, {
         message,
         userId,
       });
+
+      console.log('✅ [ROXY] Respuesta recibida:', response.data);
 
       const roxyMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -53,8 +59,24 @@ const useRoxyStore = create<RoxyState>((set, get) => ({
         messages: [...state.messages, roxyMessage],
         isLoading: false,
       }));
+      
+      // ✅ REFRESCAR ALARMAS si Roxy hizo cambios
+      if (response.data.actions && response.data.actions.length > 0) {
+        const needsRefresh = response.data.actions.some((action: any) =>
+          ['alarma_creada', 'alarma_actualizada', 'alarma_eliminada', 
+           'rutina_creada', 'evento_creado'].includes(action.tipo)
+        );
+        
+        if (needsRefresh) {
+          console.log('🔄 [ROXY] Refrescando alarmas después de acción');
+          // Importar dinámicamente para evitar dependencia circular
+          const { default: useAlarmasStore } = await import('./alarmasStore');
+          useAlarmasStore.getState().loadAlarmas();
+        }
+      }
+      
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('❌ [ROXY] Error sending message:', error);
       
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
