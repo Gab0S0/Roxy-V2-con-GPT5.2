@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,14 +6,28 @@ import {
   TouchableOpacity,
   ScrollView,
   Switch,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { getUserId } from '../../utils/userId';
 
 export default function SettingsScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = React.useState(true);
   const [soundEnabled, setSoundEnabled] = React.useState(true);
   const [vibrationEnabled, setVibrationEnabled] = React.useState(true);
+  const [userId, setUserId] = useState<string>('Cargando...');
+  const [backendUrl, setBackendUrl] = useState<string>('');
+
+  useEffect(() => {
+    loadDebugInfo();
+  }, []);
+
+  const loadDebugInfo = async () => {
+    const id = await getUserId();
+    setUserId(id);
+    setBackendUrl(process.env.EXPO_PUBLIC_BACKEND_URL || 'No configurado');
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -74,6 +88,28 @@ export default function SettingsScreen() {
               thumbColor={vibrationEnabled ? '#FFFFFF' : '#8E8E93'}
             />
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Información de Debug</Text>
+          
+          <View style={styles.debugCard}>
+            <Text style={styles.debugLabel}>User ID:</Text>
+            <Text style={styles.debugValue} selectable>{userId}</Text>
+          </View>
+
+          <View style={styles.debugCard}>
+            <Text style={styles.debugLabel}>Backend URL:</Text>
+            <Text style={styles.debugValue} selectable>{backendUrl}</Text>
+          </View>
+
+          <TouchableOpacity 
+            style={styles.refreshButton}
+            onPress={loadDebugInfo}
+          >
+            <Ionicons name="refresh" size={20} color="#FFFFFF" />
+            <Text style={styles.refreshButtonText}>Actualizar Info</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.section}>
