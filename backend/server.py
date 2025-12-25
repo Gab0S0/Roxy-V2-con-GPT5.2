@@ -321,10 +321,15 @@ async def crear_alarma(alarma: AlarmaCreate, userId: str):
     motivational_message = await generar_mensaje_motivacional(alarma.label)
     
     alarma_obj = Alarma(
-        userId=userId,  # ✅ MULTIUSUARIO
-        **alarma.dict(),
-        datetime=datetime_utc,  # ✅ UTC con Z
-        motivationalMessage=motivational_message
+        userId=userId,
+        label=alarma.label,
+        datetime=datetime_utc,
+        repeatPattern=alarma.repeatPattern,
+        repeatDays=alarma.repeatDays or [],
+        sound=alarma.sound or "default",
+        motivationalMessage=motivational_message,
+        isActive=True,
+        createdBy="user"
     )
     await db.alarmas.insert_one(alarma_obj.dict())
     return alarma_obj
