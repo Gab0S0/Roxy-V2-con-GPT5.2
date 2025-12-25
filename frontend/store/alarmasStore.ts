@@ -92,9 +92,15 @@ const useAlarmasStore = create<AlarmasState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const userId = await getUserId();
-      const response = await axios.get(`${API_URL}/api/alarmas`, {
+      const url = `${API_URL}/api/alarmas`;
+      console.log('🔵 [ALARMAS] Cargando alarmas:', { url, userId });
+      
+      const response = await axios.get(url, {
         params: { userId }
       });
+      
+      console.log('✅ [ALARMAS] Alarmas cargadas:', response.data.length, 'alarmas');
+      
       const alarmasFromServer = response.data;
 
       // Load local notification IDs
