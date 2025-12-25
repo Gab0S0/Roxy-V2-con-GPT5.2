@@ -11,6 +11,8 @@ import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from emergentintegrations.llm.chat import LlmChat, UserMessage
+import json
+import re
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -33,7 +35,7 @@ def normalize_to_utc_iso_z(dt_str: str) -> str:
         # Intentar parsear con timezone
         if dt_str.endswith('Z'):
             dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
-        elif '+' in dt_str or dt_str.count('-') > 2:  # Tiene timezone
+        elif '+' in dt_str or dt_str.count('-') > 2:
             dt = datetime.fromisoformat(dt_str)
         else:
             # Sin timezone, asumir Argentina
@@ -52,24 +54,15 @@ def next_occurrence_utc_iso_z(repeat_days: List[str], hora_hhmm: str) -> str:
     """
     Calcula la próxima ocurrencia de una rutina en hora local Argentina
     y la convierte a UTC ISO con Z
-    
-    Args:
-        repeat_days: ["monday", "thursday", etc]
-        hora_hhmm: "21:00"
-    
-    Returns:
-        ISO string en UTC con Z
     """
     day_map = {
         "monday": 0, "tuesday": 1, "wednesday": 2,
         "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6
     }
     
-    # Obtener fecha/hora actual en Argentina
     now_arg = datetime.now(ARGENTINA_TZ)
     current_weekday = now_arg.weekday()
     
-    # Parsear hora
     try:
         hora_parts = hora_hhmm.split(":")
         target_hour = int(hora_parts[0])
@@ -78,21 +71,18 @@ def next_occurrence_utc_iso_z(repeat_days: List[str], hora_hhmm: str) -> str:
         target_hour = 21
         target_minute = 0
     
-    # Encontrar el próximo día de la rutina
     min_days_ahead = 7
     for dia_str in repeat_days:
         target_day = day_map.get(dia_str, 0)
         days_ahead = (target_day - current_weekday) % 7
         
-        # Si es hoy, verificar si ya pasó la hora
         if days_ahead == 0:
             today_target = now_arg.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
             if now_arg >= today_target:
-                days_ahead = 7  # Ya pasó, programar para la próxima semana
+                days_ahead = 7
         
         min_days_ahead = min(min_days_ahead, days_ahead)
     
-    # Calcular próxima fecha en Argentina
     next_date_arg = now_arg + timedelta(days=min_days_ahead)
     next_date_arg = next_date_arg.replace(
         hour=target_hour,
@@ -101,55 +91,40 @@ def next_occurrence_utc_iso_z(repeat_days: List[str], hora_hhmm: str) -> str:
         microsecond=0
     )
     
-    # Convertir a UTC
     next_date_utc = next_date_arg.astimezone(UTC_TZ)
     return next_date_utc.isoformat().replace('+00:00', 'Z')
 
-# ============== PYDANTIC MODELS FOR LLM VALIDATION ==============
+# ============== PYDANTIC MODELS ==============
 
 class LlmParams(BaseModel):
-    """Parámetros validados de la respuesta del LLM"""
     label: Optional[str] = None
-    date: Optional[str] = None  # YYYY-MM-DD (fecha local)
-    time: Optional[str] = None  # HH:MM (hora local)
-    datetime: Optional[str] = None  # Fallback ISO
+    date: Optional[str] = None
+    time: Optional[str] = None
+    datetime: Optional[str] = None
     repeatPattern: Optional[str] = None
     repeatDays: Optional[List[str]] = []
     alarmaId: Optional[str] = None
-    hora: Optional[str] = None  # Para rutinas
+    hora: Optional[str] = None
     duracionMinutos: Optional[int] = 60
     reminderMinutes: Optional[int] = 30
     tipoEjercicio: Optional[str] = None
     descripcionRutina: Optional[str] = None
 
 class LlmResult(BaseModel):
-    """Resultado validado de la respuesta del LLM"""
     accion: str
     respuesta: str
     parametros: LlmParams = Field(default_factory=LlmParams)
 
-# ============== MONGODB CONNECTION ==============
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-# Create the main app without a prefix
-app = FastAPI()
-
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
-
-# ============== MODELS ==============
-
 class Alarma(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    userId: str  # ✅ MULTIUSUARIO
     label: str
-    datetime: str  # ISO format
-    repeatPattern: Optional[str] = None  # "daily", "weekly", "custom"
-    repeatDays: Optional[List[str]] = []  # ["monday", "tuesday", etc]
+    datetime: str  # ✅ Siempre UTC ISO con Z
+    repeatPattern: Optional[str] = None
+    repeatDays: Optional[List[str]] = []
     isActive: bool = True
     sound: Optional[str] = "default"
-    motivationalMessage: Optional[str] = None  # Mensaje personalizado por IA
+    motivationalMessage: Optional[str] = None
     createdBy: str = "user"
     createdAt: datetime = Field(default_factory=datetime.utcnow)
 
@@ -170,15 +145,15 @@ class AlarmaUpdate(BaseModel):
 
 class ChatMessage(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    userId: str = "default_user"
+    userId: str  # ✅ MULTIUSUARIO
     message: str
     response: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    actions: Optional[List[Dict]] = []  # Actions taken by Roxy
+    actions: Optional[List[Dict]] = []
 
 class ChatRequest(BaseModel):
     message: str
-    userId: Optional[str] = "default_user"
+    userId: str  # ✅ MULTIUSUARIO
 
 class ChatResponse(BaseModel):
     response: str
@@ -186,291 +161,57 @@ class ChatResponse(BaseModel):
 
 class CalendarEvent(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    userId: str = "default_user"
-    summary: str  # Título del evento
+    userId: str  # ✅ MULTIUSUARIO
+    summary: str
     description: Optional[str] = None
-    start_datetime: str  # ISO format
-    end_datetime: str  # ISO format
-    reminder_minutes: int = 30  # Minutos antes para recordar
-    alarmaId: Optional[str] = None  # ID de la alarma asociada
+    start_datetime: str  # ✅ UTC ISO con Z
+    end_datetime: str  # ✅ UTC ISO con Z
+    reminder_minutes: int = 30
+    alarmaId: Optional[str] = None
     createdAt: datetime = Field(default_factory=datetime.utcnow)
-    googleEventId: Optional[str] = None  # Para sincronizar con Google Calendar después
+    googleEventId: Optional[str] = None
 
 class Rutina(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    userId: str = "default_user"
-    nombre: str  # "Gimnasio", "Estudiar", etc
-    descripcion: Optional[str] = None  # "Día de pierna", "Estudiar IA", etc
-    dias: List[str]  # ["monday", "thursday"] 
-    hora: str  # "21:00"
+    userId: str  # ✅ MULTIUSUARIO
+    nombre: str
+    descripcion: Optional[str] = None
+    dias: List[str]
+    hora: str
     activa: bool = True
-    tipoEjercicio: Optional[str] = None  # "pierna", "pecho", "espalda" para gym
+    tipoEjercicio: Optional[str] = None
+    alarmaId: Optional[str] = None
     createdAt: datetime = Field(default_factory=datetime.utcnow)
+
+# ============== MONGODB CONNECTION ==============
+
+mongo_url = os.environ['MONGO_URL']
+client = AsyncIOMotorClient(mongo_url)
+db = client[os.environ['DB_NAME']]
+
+app = FastAPI()
+api_router = APIRouter(prefix="/api")
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # ============== HELPER FUNCTIONS ==============
 
-async def interpretar_comando_roxy(mensaje: str, alarmas_existentes: List[Alarma]) -> LlmResult:
-    """
-    Usa Gemini para interpretar comandos en lenguaje natural
-    y determinar qué acción tomar con las alarmas.
-    Retorna LlmResult validado con Pydantic.
-    """
+async def generar_mensaje_motivacional(label: str) -> str:
+    """Genera mensaje personalizado con IA según el tipo de alarma"""
     api_key = os.environ.get('EMERGENT_LLM_KEY')
     
-    # Construir contexto con alarmas existentes
-    contexto_alarmas = "\n".join([
-        f"- {a.label}: {a.datetime} (Activa: {a.isActive}, Repetir: {a.repeatPattern})" 
-        for a in alarmas_existentes
-    ])
+    system_message = f"""Eres Roxy, una asistente motivadora.
     
-    system_message = f"""Eres Roxy, una asistente personal cariñosa y motivadora en Argentina.
-
-Tu trabajo es interpretar comandos del usuario sobre alarmas y responder de forma afectuosa.
-
-Alarmas actuales del usuario:
-{contexto_alarmas if contexto_alarmas else "No hay alarmas aún."}
-
-IMPORTANTE: Responde SOLO con JSON válido, sin texto adicional.
-
-Estructura JSON requerida:
-{{
-  "accion": "crear" | "listar" | "eliminar" | "modificar" | "desactivar" | "activar" | "info" | "crear_evento" | "crear_rutina" | "ver_rutinas",
-  "respuesta": "Tu respuesta motivadora en español",
-  "parametros": {{
-    "label": "Nombre de la alarma/evento/rutina",
-    "date": "YYYY-MM-DD",
-    "time": "HH:MM",
-    "repeatPattern": "daily" | "weekly" | "custom" | null,
-    "repeatDays": ["monday", "tuesday", etc],
-    "alarmaId": "id si es modificar/eliminar",
-    "hora": "HH:MM",
-    "duracionMinutos": 60,
-    "reminderMinutes": 30,
-    "tipoEjercicio": "pierna" | "pecho" | "espalda" | null,
-    "descripcionRutina": "Detalles"
-  }}
-}}
-
-CRÍTICO - FECHAS Y HORAS:
-- El usuario está en Argentina (UTC-3)
-- SIEMPRE devuelve date y time por separado cuando sea posible
-- Formato date: "YYYY-MM-DD" (ej: "2025-12-05")
-- Formato time: "HH:MM" (ej: "21:00" para las 9 PM)
-- Si dice "mañana a las 14", devuelve date=mañana, time="14:00"
-- Si dice "hoy a las 10:30", devuelve date=hoy, time="10:30"
-- NO hagas conversiones de timezone, el backend lo maneja
-
-REGLAS:
-- Sé cariñosa y motivadora
-- Usa emojis ocasionalmente
-- Para eventos (entrevista, reunión, cita): usa accion="crear_evento"
-- Para rutinas recurrentes: usa accion="crear_rutina"
-- Si pide eliminar pero no especifica cuál: accion="info" y pide aclaración
+Genera un mensaje corto (máximo 12 palabras) para una alarma: "{label}"
 
 Ejemplos:
-- "Crea alarma mañana a las 14" → {{"accion":"crear", "parametros":{{"label":"Alarma", "date":"2025-12-06", "time":"14:00"}}}}
-- "Rutina gym martes y jueves 21" → {{"accion":"crear_rutina", "parametros":{{"label":"Gym", "repeatDays":["tuesday","thursday"], "hora":"21:00"}}}}"""
-    
-    try:
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"roxy_session_{datetime.now().timestamp()}",
-            system_message=system_message
-        ).with_model("gemini", "gemini-2.0-flash")
-        
-        user_message = UserMessage(text=mensaje)
-        response = await chat.send_message(user_message)
-        
-        # Parsear respuesta JSON
-        import json
-        import re
-        
-        response_clean = response.strip()
-        
-        # Remover markdown si existe
-        if response_clean.startswith("```"):
-            json_match = re.search(r'```(?:json)?\s*(\{{.*?\}})\s*```', response_clean, re.DOTALL)
-            if json_match:
-                response_clean = json_match.group(1)
-            else:
-                response_clean = response_clean.replace("```json", "").replace("```", "").strip()
-        
-        # Intentar parsear el JSON
-        try:
-            resultado_dict = json.loads(response_clean)
-        except json.JSONDecodeError:
-            json_match = re.search(r'\{{.*\}}', response_clean, re.DOTALL)
-            if json_match:
-                resultado_dict = json.loads(json_match.group(0))
-            else:
-                raise ValueError("No se pudo extraer JSON válido")
-        
-        # Validar con Pydantic
-        resultado = LlmResult.model_validate(resultado_dict)
-        return resultado
-        
-    except ValidationError as e:
-        logger.error(f"Error de validación Pydantic: {str(e)}")
-        return LlmResult(
-            accion="info",
-            respuesta="No entendí bien lo que dijiste. ¿Podrías repetirlo de otra forma? 💙",
-            parametros=LlmParams()
-        )
-    except Exception as e:
-        logger.error(f"Error en interpretar_comando_roxy: {str(e)}")
-        logger.error(f"Respuesta original: {response if 'response' in locals() else 'No disponible'}")
-        return LlmResult(
-            accion="info",
-            respuesta=f"Disculpa, tuve un problemita. ¿Intentamos de nuevo? Estoy aquí para ti. 💙",
-            parametros=LlmParams()
-        )
-    """
-    Usa OpenAI para interpretar comandos en lenguaje natural
-    y determinar qué acción tomar con las alarmas
-    """
-    api_key = os.environ.get('EMERGENT_LLM_KEY')
-    
-    # Construir contexto con alarmas existentes
-    contexto_alarmas = "\n".join([
-        f"- {a.label}: {a.datetime} (Activa: {a.isActive}, Repetir: {a.repeatPattern})" 
-        for a in alarmas_existentes
-    ])
-    
-    system_message = f"""Eres Roxy, una asistente personal cariñosa y motivadora. Eres como una compañera de confianza que siempre está ahí para apoyar.
+- Entrenar: "¡Hora de entrenar! Tu cuerpo te lo agradecerá 💪"
+- Estudiar: "A aprender! Tu futuro se construye hoy 📚✨"
+- Trabajar: "Momento de brillar profesionalmente! Tú puedes 🌟"
+- Dormir: "A descansar, mañana será increíble 🌙💙"
 
-Tu trabajo es interpretar comandos del usuario sobre alarmas y responder de forma afectuosa pero firme.
-
-Alarmas actuales del usuario:
-{contexto_alarmas if contexto_alarmas else "No hay alarmas aún."}
-
-IMPORTANTE: Debes responder SOLO con JSON válido, sin texto adicional.
-
-Estructura JSON requerida:
-{{
-  "accion": "crear" | "listar" | "eliminar" | "modificar" | "desactivar" | "activar" | "info" | "crear_evento" | "crear_rutina" | "ver_rutinas",
-  "respuesta": "Tu respuesta motivadora y afectuosa en español",
-  "parametros": {{
-    "label": "Nombre de la alarma/evento/rutina",
-    "datetime": "YYYY-MM-DDTHH:MM:00.000Z",
-    "repeatPattern": "daily" | "weekly" | "custom" | null,
-    "repeatDays": ["monday", "tuesday", etc] o [],
-    "alarmaId": "id si es modificar/eliminar",
-    "esEvento": false,
-    "duracionMinutos": 60,
-    "reminderMinutes": 30,
-    "esRutina": false,
-    "tipoEjercicio": "pierna" | "pecho" | "espalda" | "brazo" | null,
-    "descripcionRutina": "Detalles de la rutina"
-  }}
-}}
-
-Ejemplos de respuestas afectuosas:
-- "¡Listo! ❤️ Te acompaño en tu entrenamiento. Alarma configurada para gimnasio."
-- "Perfecto! Vamos a estudiar juntos. Te aviso a las 19:00, dale con todo! 💪"
-- "Aquí están tus alarmas de hoy. Estoy contigo en cada paso! 🌟"
-- "Perfecto! Guardé tu entrevista en el calendario y te avisaré 30 minutos antes. ¡Vas a brillar! ✨"
-
-REGLAS IMPORTANTES:
-- Siempre responde SOLO JSON, sin texto antes o después
-- Sé cariñosa y motivadora
-- Usa emojis ocasionalmente para ser más cercana
-- Cuando sea "entrenar" o "gimnasio", sé motivadora con el ejercicio
-- Cuando sea "estudiar", sé inspiradora con el aprendizaje
-- Cuando sea "trabajar" o "reunión", sé profesional pero apoyadora
-
-IMPORTANTE SOBRE EVENTOS Y HORAS:
-- Si el usuario dice "tengo [evento] a las X" o "mañana tengo [evento]", usa accion="crear_evento"
-- Los eventos van al calendario Y se crea una alarma de recordatorio automática
-- Ejemplos de eventos: "entrevista", "reunión", "cita médica", "cumpleaños"
-- Para eventos, esEvento=true y crea alarma X minutos antes (default 30 min)
-
-CRÍTICO SOBRE HORARIOS:
-- El usuario está en Argentina (UTC-3)
-- Cuando diga una hora, NO la modifiques. Si dice "12:46" es las 12:46 de su zona horaria
-- El formato datetime debe ser: "YYYY-MM-DDTHH:MM:00.000Z" pero calculando UTC desde Argentina
-- Ejemplo: Si dice "mañana a las 14:00" y es 21 de julio, usa "2025-07-21T17:00:00.000Z" (14:00 ARG = 17:00 UTC)
-- Si solo dice "mañana" sin hora, usa las 09:00 local (12:00 UTC)
-
-SISTEMA DE RUTINAS (NUEVO):
-- Si el usuario dice "jueves hago pierna a las 21" o "los martes entreno pecho", usa accion="crear_rutina"
-- Las rutinas son alarmas recurrentes automáticas que se crean semanalmente
-- Ejemplo: "Jueves es día de pierna a las 21" → crear_rutina con repeatDays=["thursday"], hora="21:00", tipoEjercicio="pierna"
-- Cuando el usuario pregunte "¿qué rutinas tengo?" o "muéstrame mis rutinas", usa accion="ver_rutinas"
-- Las rutinas se pueden ver y modificar en el chat"""
-    
-    try:
-        chat = LlmChat(
-            api_key=api_key,
-            session_id=f"roxy_session_{datetime.now().timestamp()}",
-            system_message=system_message
-        ).with_model("gemini", "gemini-2.0-flash")
-        
-        user_message = UserMessage(text=mensaje)
-        response = await chat.send_message(user_message)
-        
-        # Parsear respuesta JSON con mejor manejo de errores
-        import json
-        import re
-        
-        # Limpiar la respuesta
-        response_clean = response.strip()
-        
-        # Remover markdown si existe
-        if response_clean.startswith("```"):
-            # Buscar el JSON entre los bloques de código
-            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_clean, re.DOTALL)
-            if json_match:
-                response_clean = json_match.group(1)
-            else:
-                # Remover los backticks manualmente
-                response_clean = response_clean.replace("```json", "").replace("```", "").strip()
-        
-        # Intentar parsear el JSON
-        try:
-            resultado = json.loads(response_clean)
-        except json.JSONDecodeError:
-            # Si falla, intentar extraer JSON del texto
-            json_match = re.search(r'\{.*\}', response_clean, re.DOTALL)
-            if json_match:
-                resultado = json.loads(json_match.group(0))
-            else:
-                raise ValueError("No se pudo extraer JSON válido de la respuesta")
-        
-        # Validar estructura básica
-        if "accion" not in resultado or "respuesta" not in resultado:
-            raise ValueError("JSON no tiene la estructura esperada")
-        
-        return resultado
-        
-    except Exception as e:
-        logger.error(f"Error en interpretar_comando_roxy: {str(e)}")
-        logger.error(f"Respuesta original: {response if 'response' in locals() else 'No disponible'}")
-        return {
-            "accion": "info",
-            "respuesta": f"Disculpa, tuve un problemita procesando eso. ¿Podrías intentar de nuevo? Estoy aquí para ayudarte. 💙",
-            "parametros": {}
-        }
-
-async def generar_mensaje_motivacional(label: str) -> str:
-    """
-    Genera un mensaje personalizado con IA según el tipo de alarma
-    """
-    api_key = os.environ.get('EMERGENT_LLM_KEY')
-    
-    system_message = f"""Eres Roxy, una asistente motivadora y cariñosa.
-
-Genera un mensaje corto (máximo 12 palabras) y motivador para una alarma con este título: "{label}"
-
-Ejemplos según el tipo:
-- Para "Gimnasio", "Entrenar", "Ejercicio": "¡Hora de entrenar! Tu cuerpo te lo agradecerá 💪"
-- Para "Estudiar", "Clase", "Leer": "A aprender! Tu futuro se construye hoy 📚✨"
-- Para "Trabajar", "Reunión", "Oficina": "Momento de brillar profesionalmente! Tú puedes 🌟"
-- Para "Dormir", "Descansar": "A descansar, mañana será un día increíble 🌙💙"
-- Para "Meditar", "Yoga": "Tiempo para ti, relájate y respira 🧘‍♀️"
-- Para cosas personales: Sé cariñosa y motivadora
-
-Responde SOLO con el mensaje, sin comillas ni formato extra.
-Usa emojis relevantes al final."""
+Responde SOLO el mensaje, sin comillas."""
     
     try:
         chat = LlmChat(
@@ -479,106 +220,218 @@ Usa emojis relevantes al final."""
             system_message=system_message
         ).with_model("gemini", "gemini-2.0-flash")
         
-        user_message = UserMessage(text="Genera el mensaje motivacional")
-        response = await chat.send_message(user_message)
+        response = await chat.send_message(UserMessage(text="Genera el mensaje"))
         return response.strip().strip('"').strip("'")
     except Exception as e:
-        logger.error(f"Error generando mensaje motivacional: {str(e)}")
-        # Mensaje por defecto cariñoso
+        logger.error(f"Error generando mensaje: {str(e)}")
         return "¡Es hora! Estoy contigo, vamos juntas 💙✨"
 
-# ============== ROUTES - ALARMAS ==============
+async def interpretar_comando_roxy(mensaje: str, alarmas_existentes: List[Alarma], userId: str) -> LlmResult:
+    """Interpreta comandos con Gemini y valida con Pydantic"""
+    api_key = os.environ.get('EMERGENT_LLM_KEY')
+    
+    contexto_alarmas = "\n".join([
+        f"- {a.label}: {a.datetime} (Activa: {a.isActive})" 
+        for a in alarmas_existentes
+    ])
+    
+    system_message = f"""Eres Roxy, asistente personal cariñosa en Argentina.
+
+Alarmas del usuario:
+{contexto_alarmas if contexto_alarmas else "No hay alarmas."}
+
+Responde SOLO con JSON válido:
+{{
+  "accion": "crear" | "listar" | "eliminar" | "modificar" | "desactivar" | "activar" | "info" | "crear_evento" | "crear_rutina" | "ver_rutinas",
+  "respuesta": "Mensaje motivador en español",
+  "parametros": {{
+    "label": "Nombre",
+    "date": "YYYY-MM-DD",
+    "time": "HH:MM",
+    "repeatPattern": "daily" | "weekly" | "custom" | null,
+    "repeatDays": ["monday", "tuesday"],
+    "alarmaId": "id",
+    "hora": "HH:MM",
+    "duracionMinutos": 60,
+    "reminderMinutes": 30,
+    "tipoEjercicio": "pierna" | "pecho",
+    "descripcionRutina": "..."
+  }}
+}}
+
+CRÍTICO:
+- Usuario en Argentina (UTC-3)
+- Devuelve date y time SEPARADOS siempre que puedas
+- date: "YYYY-MM-DD", time: "HH:MM"
+- NO hagas conversiones, el backend lo maneja
+- Para eventos: accion="crear_evento"
+- Para rutinas: accion="crear_rutina"
+- Si pide eliminar sin especificar: accion="info" y pregunta cuál"""
+    
+    try:
+        chat = LlmChat(
+            api_key=api_key,
+            session_id=f"roxy_{userId}_{datetime.now().timestamp()}",
+            system_message=system_message
+        ).with_model("gemini", "gemini-2.0-flash")
+        
+        response = await chat.send_message(UserMessage(text=mensaje))
+        response_clean = response.strip()
+        
+        if response_clean.startswith("```"):
+            json_match = re.search(r'```(?:json)?\s*(\{{.*?\}})\s*```', response_clean, re.DOTALL)
+            if json_match:
+                response_clean = json_match.group(1)
+            else:
+                response_clean = response_clean.replace("```json", "").replace("```", "").strip()
+        
+        try:
+            resultado_dict = json.loads(response_clean)
+        except json.JSONDecodeError:
+            json_match = re.search(r'\{{.*\}}', response_clean, re.DOTALL)
+            if json_match:
+                resultado_dict = json.loads(json_match.group(0))
+            else:
+                raise ValueError("No se pudo extraer JSON")
+        
+        # ✅ Validar con Pydantic
+        return LlmResult.model_validate(resultado_dict)
+        
+    except ValidationError as e:
+        logger.error(f"Error de validación: {str(e)}")
+        return LlmResult(
+            accion="info",
+            respuesta="No entendí bien. ¿Podrías repetirlo? 💙",
+            parametros=LlmParams()
+        )
+    except Exception as e:
+        logger.error(f"Error interpretando: {str(e)}")
+        return LlmResult(
+            accion="info",
+            respuesta="Tuve un problemita. ¿Intentamos de nuevo? 💙",
+            parametros=LlmParams()
+        )
+
+# ============== ENDPOINTS - ALARMAS ==============
 
 @api_router.post("/alarmas", response_model=Alarma)
-async def crear_alarma(alarma: AlarmaCreate):
-    """Crear una nueva alarma"""
-    # Generar mensaje motivacional personalizado
+async def crear_alarma(alarma: AlarmaCreate, userId: str):
+    """Crear alarma - ✅ MULTIUSUARIO + TIMEZONE"""
+    datetime_utc = normalize_to_utc_iso_z(alarma.datetime)
     motivational_message = await generar_mensaje_motivacional(alarma.label)
     
     alarma_obj = Alarma(
+        userId=userId,  # ✅ MULTIUSUARIO
         **alarma.dict(),
+        datetime=datetime_utc,  # ✅ UTC con Z
         motivationalMessage=motivational_message
     )
     await db.alarmas.insert_one(alarma_obj.dict())
     return alarma_obj
 
 @api_router.get("/alarmas", response_model=List[Alarma])
-async def obtener_alarmas():
-    """Obtener todas las alarmas"""
-    alarmas = await db.alarmas.find().to_list(1000)
-    return [Alarma(**alarma) for alarma in alarmas]
+async def obtener_alarmas(userId: str):
+    """Listar alarmas - ✅ MULTIUSUARIO"""
+    alarmas = await db.alarmas.find({"userId": userId}).to_list(1000)
+    return [Alarma(**a) for a in alarmas]
 
 @api_router.get("/alarmas/{alarma_id}", response_model=Alarma)
-async def obtener_alarma(alarma_id: str):
-    """Obtener una alarma específica"""
-    alarma = await db.alarmas.find_one({"id": alarma_id})
+async def obtener_alarma(alarma_id: str, userId: str):
+    """Obtener alarma - ✅ MULTIUSUARIO"""
+    alarma = await db.alarmas.find_one({"id": alarma_id, "userId": userId})
     if not alarma:
         raise HTTPException(status_code=404, detail="Alarma no encontrada")
     return Alarma(**alarma)
 
 @api_router.put("/alarmas/{alarma_id}", response_model=Alarma)
-async def actualizar_alarma(alarma_id: str, update: AlarmaUpdate):
-    """Actualizar una alarma"""
-    alarma = await db.alarmas.find_one({"id": alarma_id})
+async def actualizar_alarma(alarma_id: str, update: AlarmaUpdate, userId: str):
+    """Actualizar alarma - ✅ MULTIUSUARIO + TIMEZONE"""
+    alarma = await db.alarmas.find_one({"id": alarma_id, "userId": userId})
     if not alarma:
         raise HTTPException(status_code=404, detail="Alarma no encontrada")
     
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     
+    # ✅ Normalizar datetime si viene
+    if "datetime" in update_data:
+        update_data["datetime"] = normalize_to_utc_iso_z(update_data["datetime"])
+    
     await db.alarmas.update_one(
-        {"id": alarma_id},
+        {"id": alarma_id, "userId": userId},
         {"$set": update_data}
     )
     
-    alarma_actualizada = await db.alarmas.find_one({"id": alarma_id})
+    alarma_actualizada = await db.alarmas.find_one({"id": alarma_id, "userId": userId})
     return Alarma(**alarma_actualizada)
 
 @api_router.delete("/alarmas/{alarma_id}")
-async def eliminar_alarma(alarma_id: str):
-    """Eliminar una alarma"""
-    result = await db.alarmas.delete_one({"id": alarma_id})
+async def eliminar_alarma(alarma_id: str, userId: str):
+    """Eliminar alarma - ✅ MULTIUSUARIO"""
+    result = await db.alarmas.delete_one({"id": alarma_id, "userId": userId})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Alarma no encontrada")
-    return {"message": "Alarma eliminada exitosamente"}
+    return {"message": "Alarma eliminada"}
 
-# ============== ROUTES - ROXY CHAT ==============
+# ============== ENDPOINTS - RUTINAS ==============
+
+@api_router.get("/rutinas")
+async def obtener_rutinas(userId: str):
+    """Listar rutinas - ✅ MULTIUSUARIO"""
+    rutinas = await db.rutinas.find({"userId": userId}).to_list(100)
+    for r in rutinas:
+        if '_id' in r:
+            del r['_id']
+    return rutinas
+
+@api_router.delete("/rutinas/{rutina_id}")
+async def eliminar_rutina(rutina_id: str, userId: str):
+    """Eliminar rutina - ✅ MULTIUSUARIO"""
+    rutina = await db.rutinas.find_one({"id": rutina_id, "userId": userId})
+    if not rutina:
+        raise HTTPException(status_code=404, detail="Rutina no encontrada")
+    
+    if rutina.get("alarmaId"):
+        try:
+            await eliminar_alarma(rutina["alarmaId"], userId)
+        except:
+            pass
+    
+    result = await db.rutinas.delete_one({"id": rutina_id, "userId": userId})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Rutina no encontrada")
+    
+    return {"message": "Rutina eliminada"}
+
+# ============== ENDPOINTS - CHAT ==============
 
 @api_router.post("/chat", response_model=ChatResponse)
 async def chat_con_roxy(request: ChatRequest):
-    """Procesar un mensaje del usuario y ejecutar acciones - CON MULTIUSUARIO"""
+    """Chat con Roxy - ✅ MULTIUSUARIO + TIMEZONE + VALIDACIÓN"""
     
-    # ✅ MULTIUSUARIO: Obtener alarmas solo de este usuario
+    # ✅ MULTIUSUARIO: Solo alarmas de este usuario
     alarmas = await db.alarmas.find({"userId": request.userId}).to_list(1000)
     alarmas_obj = [Alarma(**a) for a in alarmas]
     
-    # Interpretar comando con Gemini (retorna LlmResult validado)
-    resultado = await interpretar_comando_roxy(request.message, alarmas_obj)
+    # ✅ Interpretar con validación Pydantic
+    resultado = await interpretar_comando_roxy(request.message, alarmas_obj, request.userId)
     
     acciones_realizadas = []
-    
-    # Ejecutar acción según lo interpretado
     accion = resultado.accion
     params = resultado.parametros
     
-    # Helper para construir datetime desde date + time
     def build_datetime_utc() -> str:
-        """Construye datetime UTC desde date y time del LLM"""
+        """Construye datetime UTC desde date + time"""
         if params.date and params.time:
-            # Tenemos date y time separados (preferido)
             dt_str_local = f"{params.date}T{params.time}:00"
             return normalize_to_utc_iso_z(dt_str_local)
         elif params.datetime:
-            # Fallback: datetime completo
             return normalize_to_utc_iso_z(params.datetime)
         else:
-            # Sin info, usar ahora
             return normalize_to_utc_iso_z(datetime.now().isoformat())
     
     try:
         if accion == "crear":
-            # Crear nueva alarma con timezone correcto
             datetime_utc = build_datetime_utc()
-            
             nueva_alarma = AlarmaCreate(
                 label=params.label or "Alarma",
                 datetime=datetime_utc,
@@ -586,51 +439,41 @@ async def chat_con_roxy(request: ChatRequest):
                 repeatDays=params.repeatDays or [],
                 sound="default"
             )
-            alarma_creada = await crear_alarma(nueva_alarma)
+            alarma_creada = await crear_alarma(nueva_alarma, request.userId)
             acciones_realizadas.append({
                 "tipo": "alarma_creada",
                 "alarma": alarma_creada.dict()
             })
             
         elif accion == "crear_evento":
-            # Crear evento en calendario + alarma de recordatorio
-            from datetime import timedelta
+            datetime_utc = build_datetime_utc()
+            start_dt = datetime.fromisoformat(datetime_utc.replace('Z', '+00:00'))
+            end_dt = start_dt + timedelta(minutes=params.duracionMinutos or 60)
             
-            start_time = parametros.get("datetime")
-            duracion = parametros.get("duracionMinutos", 60)
-            reminder_min = parametros.get("reminderMinutes", 30)
-            
-            # Calcular hora de fin del evento
-            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-            end_dt = start_dt + timedelta(minutes=duracion)
-            
-            # Crear evento en "calendario" (MongoDB por ahora)
             evento = CalendarEvent(
                 userId=request.userId,
-                summary=parametros.get("label", "Evento"),
-                description=f"Evento creado por Roxy",
-                start_datetime=start_time,
-                end_datetime=end_dt.isoformat(),
-                reminder_minutes=reminder_min
+                summary=params.label or "Evento",
+                description="Evento creado por Roxy",
+                start_datetime=datetime_utc,
+                end_datetime=end_dt.isoformat().replace('+00:00', 'Z'),
+                reminder_minutes=params.reminderMinutes or 30
             )
             await db.calendar_events.insert_one(evento.dict())
             
-            # Crear alarma de recordatorio X minutos antes
-            reminder_dt = start_dt - timedelta(minutes=reminder_min)
-            reminder_label = f"📅 {parametros.get('label', 'Evento')}"
+            reminder_dt = start_dt - timedelta(minutes=evento.reminder_minutes)
+            reminder_label = f"📅 {evento.summary}"
             
             nueva_alarma = AlarmaCreate(
                 label=reminder_label,
-                datetime=reminder_dt.isoformat(),
+                datetime=reminder_dt.isoformat().replace('+00:00', 'Z'),
                 repeatPattern=None,
                 repeatDays=[],
                 sound="default"
             )
-            alarma_creada = await crear_alarma(nueva_alarma)
+            alarma_creada = await crear_alarma(nueva_alarma, request.userId)
             
-            # Actualizar evento con ID de alarma
             await db.calendar_events.update_one(
-                {"id": evento.id},
+                {"id": evento.id, "userId": request.userId},
                 {"$set": {"alarmaId": alarma_creada.id}}
             )
             
@@ -641,64 +484,34 @@ async def chat_con_roxy(request: ChatRequest):
             })
             
         elif accion == "crear_rutina":
-            # Crear rutina recurrente
-            from datetime import timedelta
-            
-            dias = parametros.get("repeatDays", [])
-            hora = parametros.get("hora", "21:00")
+            dias = params.repeatDays or []
+            hora = params.hora or "21:00"
             
             rutina = Rutina(
                 userId=request.userId,
-                nombre=parametros.get("label", "Rutina"),
-                descripcion=parametros.get("descripcionRutina", ""),
+                nombre=params.label or "Rutina",
+                descripcion=params.descripcionRutina or "",
                 dias=dias,
                 hora=hora,
-                tipoEjercicio=parametros.get("tipoEjercicio"),
+                tipoEjercicio=params.tipoEjercicio,
                 activa=True
             )
             await db.rutinas.insert_one(rutina.dict())
             
-            # Crear alarma recurrente para esta rutina
-            # Calcular datetime para el próximo día de la rutina
-            
-            # Mapeo de días
-            day_map = {
-                "monday": 0, "tuesday": 1, "wednesday": 2,
-                "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6
-            }
-            
-            # Encontrar el próximo día de la rutina
-            today = datetime.now()
-            current_weekday = today.weekday()
-            
-            min_days_ahead = 7
-            for dia_str in dias:
-                target_day = day_map.get(dia_str, 0)
-                days_ahead = (target_day - current_weekday) % 7
-                if days_ahead == 0:
-                    days_ahead = 7  # Si es hoy, programar para la próxima semana
-                min_days_ahead = min(min_days_ahead, days_ahead)
-            
-            # Calcular fecha y hora de la próxima alarma
-            next_date = today + timedelta(days=min_days_ahead)
-            hora_parts = hora.split(":")
-            next_date = next_date.replace(hour=int(hora_parts[0]), minute=int(hora_parts[1]), second=0, microsecond=0)
-            
-            # Ajustar a UTC (Argentina es UTC-3)
-            next_date_utc = next_date + timedelta(hours=3)
+            # ✅ Usar helper de timezone (NO +3 hours manual)
+            datetime_utc = next_occurrence_utc_iso_z(dias, hora)
             
             nueva_alarma = AlarmaCreate(
                 label=f"🏋️ {rutina.nombre}",
-                datetime=next_date_utc.isoformat(),
+                datetime=datetime_utc,
                 repeatPattern="custom",
                 repeatDays=dias,
                 sound="default"
             )
-            alarma_creada = await crear_alarma(nueva_alarma)
+            alarma_creada = await crear_alarma(nueva_alarma, request.userId)
             
-            # Actualizar rutina con ID de alarma
             await db.rutinas.update_one(
-                {"id": rutina.id},
+                {"id": rutina.id, "userId": request.userId},
                 {"$set": {"alarmaId": alarma_creada.id}}
             )
             
@@ -709,23 +522,19 @@ async def chat_con_roxy(request: ChatRequest):
             })
             
         elif accion == "ver_rutinas":
-            # Listar rutinas del usuario
             rutinas_raw = await db.rutinas.find({"userId": request.userId}).to_list(100)
-            
-            # Convertir ObjectId a string y limpiar
             rutinas = []
             for r in rutinas_raw:
                 if '_id' in r:
-                    del r['_id']  # Remover ObjectId de MongoDB
+                    del r['_id']
                 rutinas.append(r)
             
-            # Formatear respuesta con las rutinas
             if rutinas:
                 rutinas_texto = "\n".join([
                     f"- {r.get('nombre', 'Rutina')} ({', '.join(r.get('dias', []))}) a las {r.get('hora', '00:00')}"
                     for r in rutinas
                 ])
-                resultado["respuesta"] = f"Aquí están tus rutinas activas:\n{rutinas_texto}"
+                resultado.respuesta = f"Aquí están tus rutinas:\n{rutinas_texto}"
             
             acciones_realizadas.append({
                 "tipo": "listar_rutinas",
@@ -733,30 +542,31 @@ async def chat_con_roxy(request: ChatRequest):
             })
             
         elif accion == "eliminar":
-            alarma_id = parametros.get("alarmaId")
-            if alarma_id:
-                await eliminar_alarma(alarma_id)
+            # ✅ VALIDACIÓN: NO eliminar sin ID
+            if not params.alarmaId:
+                resultado.respuesta = "¿Cuál alarma quieres eliminar? Dime el nombre o muéstrame la lista."
+            else:
+                await eliminar_alarma(params.alarmaId, request.userId)
                 acciones_realizadas.append({
                     "tipo": "alarma_eliminada",
-                    "alarmaId": alarma_id
+                    "alarmaId": params.alarmaId
                 })
                 
         elif accion == "modificar" or accion == "desactivar" or accion == "activar":
-            alarma_id = parametros.get("alarmaId")
-            if alarma_id:
+            if params.alarmaId:
                 update = AlarmaUpdate(
-                    label=parametros.get("label"),
-                    datetime=parametros.get("datetime"),
+                    label=params.label,
+                    datetime=params.datetime,
                     isActive=True if accion == "activar" else False if accion == "desactivar" else None
                 )
-                alarma_actualizada = await actualizar_alarma(alarma_id, update)
+                alarma_actualizada = await actualizar_alarma(params.alarmaId, update, request.userId)
                 acciones_realizadas.append({
                     "tipo": "alarma_actualizada",
                     "alarma": alarma_actualizada.dict()
                 })
                 
         elif accion == "listar":
-            alarmas_actuales = await obtener_alarmas()
+            alarmas_actuales = await obtener_alarmas(request.userId)
             acciones_realizadas.append({
                 "tipo": "listar_alarmas",
                 "alarmas": [a.dict() for a in alarmas_actuales]
@@ -764,71 +574,41 @@ async def chat_con_roxy(request: ChatRequest):
             
     except Exception as e:
         logger.error(f"Error ejecutando acción: {str(e)}")
-        resultado["respuesta"] += f" Nota: Hubo un problema al ejecutar la acción."
+        resultado.respuesta += " Nota: Hubo un problema al ejecutar la acción."
     
-    # Guardar conversación en BD
+    # Guardar en historial
     chat_message = ChatMessage(
         userId=request.userId,
         message=request.message,
-        response=resultado.get("respuesta", "Lo siento, no entendí."),
+        response=resultado.respuesta,
         actions=acciones_realizadas
     )
     await db.chat_history.insert_one(chat_message.dict())
     
     return ChatResponse(
-        response=resultado.get("respuesta", "Lo siento, no entendí."),
+        response=resultado.respuesta,
         actions=acciones_realizadas
     )
 
 @api_router.get("/chat/history", response_model=List[ChatMessage])
-async def obtener_historial_chat(userId: str = "default_user", limit: int = 50):
-    """Obtener historial de conversaciones"""
+async def obtener_historial_chat(userId: str, limit: int = 50):
+    """Historial de chat - ✅ MULTIUSUARIO"""
     mensajes = await db.chat_history.find(
         {"userId": userId}
     ).sort("timestamp", -1).limit(limit).to_list(limit)
     
     return [ChatMessage(**msg) for msg in mensajes]
 
-# ============== ROUTES - RUTINAS ==============
-
-@api_router.get("/rutinas")
-async def obtener_rutinas(userId: str = "default_user"):
-    """Obtener todas las rutinas del usuario"""
-    rutinas = await db.rutinas.find({"userId": userId}).to_list(100)
-    return [Rutina(**r) for r in rutinas]
-
-@api_router.delete("/rutinas/{rutina_id}")
-async def eliminar_rutina(rutina_id: str):
-    """Eliminar una rutina y su alarma asociada"""
-    rutina = await db.rutinas.find_one({"id": rutina_id})
-    if not rutina:
-        raise HTTPException(status_code=404, detail="Rutina no encontrada")
-    
-    # Eliminar alarma asociada si existe
-    if rutina.get("alarmaId"):
-        try:
-            await eliminar_alarma(rutina["alarmaId"])
-        except:
-            pass  # Si la alarma no existe, continuar
-    
-    # Eliminar rutina
-    result = await db.rutinas.delete_one({"id": rutina_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail="Rutina no encontrada")
-    
-    return {"message": "Rutina eliminada exitosamente"}
-
 # ============== BASIC ROUTES ==============
 
 @api_router.get("/")
 async def root():
-    return {"message": "Roxy Backend API - Funcionando correctamente"}
+    return {"message": "Roxy Backend API - ✅ Multiusuario + Timezone Argentina"}
 
 @api_router.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "roxy-api"}
+    return {"status": "healthy", "service": "roxy-api", "timezone": "America/Argentina/Buenos_Aires"}
 
-# Include the router in the main app
 app.include_router(api_router)
 
 app.add_middleware(
@@ -838,13 +618,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
