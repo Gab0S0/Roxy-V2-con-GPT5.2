@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import axios from 'axios';
+import { getUserId } from '../utils/userId';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -23,7 +24,6 @@ const useRoxyStore = create<RoxyState>((set, get) => ({
   error: null,
 
   sendMessage: async (message: string) => {
-    // Add user message immediately
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -37,9 +37,10 @@ const useRoxyStore = create<RoxyState>((set, get) => ({
     }));
 
     try {
+      const userId = await getUserId();
       const response = await axios.post(`${API_URL}/api/chat`, {
         message,
-        userId: 'default_user',
+        userId,
       });
 
       const roxyMessage: Message = {
@@ -58,7 +59,7 @@ const useRoxyStore = create<RoxyState>((set, get) => ({
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: 'Lo siento, tuve un problema al procesar tu mensaje. Intenta de nuevo.',
+        content: 'Lo siento, tuve un problema. Intenta de nuevo.',
       };
 
       set((state) => ({

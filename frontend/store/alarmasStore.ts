@@ -3,6 +3,7 @@ import axios from 'axios';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { getUserId } from '../utils/userId';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
@@ -29,7 +30,6 @@ interface AlarmasState {
   toggleAlarma: (id: string) => Promise<void>;
 }
 
-// Configure notifications
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -40,14 +40,12 @@ Notifications.setNotificationHandler({
 
 const scheduleNotification = async (alarma: Alarma): Promise<string | null> => {
   try {
-    // Request permissions
     const { status } = await Notifications.requestPermissionsAsync();
     if (status !== 'granted') {
       console.log('Notification permissions not granted');
       return null;
     }
 
-    // Calculate trigger time
     const alarmDate = new Date(alarma.datetime);
     const now = new Date();
     const triggerTime = alarmDate.getTime() - now.getTime();
@@ -79,6 +77,7 @@ const scheduleNotification = async (alarma: Alarma): Promise<string | null> => {
 const cancelNotification = async (notificationId: string) => {
   try {
     await Notifications.cancelScheduledNotificationAsync(notificationId);
+    console.log('✅ Notification cancelled:', notificationId);
   } catch (error) {
     console.error('Error canceling notification:', error);
   }
@@ -92,7 +91,10 @@ const useAlarmasStore = create<AlarmasState>((set, get) => ({
   loadAlarmas: async () => {
     set({ isLoading: true, error: null });
     try {
-      const response = await axios.get(`${API_URL}/api/alarmas`);
+      const userId = await getUserId();
+      const response = await axios.get(`${API_URL}/api/alarmas`, {
+        params: { userId }
+      });
       const alarmasFromServer = response.data;
 
       // Load local notification IDs
@@ -117,7 +119,10 @@ const useAlarmasStore = create<AlarmasState>((set, get) => ({
   createAlarma: async (alarmaData) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await axios.post(`${API_URL}/api/alarmas`, alarmaData);
+      const userId = await getUserId();
+      const response = await axios.post(`${API_URL}/api/alarmas`, alarmaData, {
+        params: { userId }
+      });
       const newAlarma = response.data;
 
       // Schedule notification
@@ -143,10 +148,13 @@ const useAlarmasStore = create<AlarmasState>((set, get) => ({
   updateAlarma: async (id, updates) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await axios.put(`${API_URL}/api/alarmas/${id}`, updates);
+      const userId = await getUserId();
+      const response = await axios.put(`${API_URL}/api/alarmas/${id}`, updates, {
+        params: { userId }
+      });
       const updatedAlarma = response.data;
 
-      // Reschedule notification if alarm is active
+      // Reschedule notification if active
       if (updatedAlarma.isActive) {
         const stored = await AsyncStorage.getItem(`alarm_${id}`);
         if (stored) {
@@ -190,7 +198,10 @@ const useAlarmasStore = create<AlarmasState>((set, get) => ({
         await AsyncStorage.removeItem(`alarm_${id}`);
       }
 
-      await axios.delete(`${API_URL}/api/alarmas/${id}`);
+      const userId = await getUserId();
+      await axios.delete(`${API_URL}/api/alarmas/${id}`, {
+        params: { userId }
+      });
       set((state) => ({
         alarmas: state.alarmas.filter((a) => a.id !== id),
         isLoading: false,
@@ -207,11 +218,12 @@ const useAlarmasStore = create<AlarmasState>((set, get) => ({
 
     const newActiveState = !alarma.isActive;
 
+    // ✅ REPROGRAMACIÓN LIMPIA
     if (newActiveState) {
-      // Activate: schedule notification
+      // Activar: reprogramar desde cero
       await get().updateAlarma(id, { isActive: true });
     } else {
-      // Deactivate: cancel notification
+      // Desactivar: cancelar notificación
       const stored = await AsyncStorage.getItem(`alarm_${id}`);
       if (stored) {
         const data = JSON.parse(stored);
