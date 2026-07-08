@@ -39,19 +39,21 @@ export default function TabLayout() {
         }}
       />
 
-      <Tabs.Screen
-        name="roxy"
-        options={{
-          title: 'Roxy',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons
-              name="chatbubble-ellipses-outline"
-              size={size}
-              color={color}
-            />
-          ),
-        }}
-      />
+     <Tabs.Screen
+  name="agenda"
+  options={{
+    title: 'Agenda',
+    tabBarIcon: ({ color, size }) => (
+      <Ionicons name="calendar-outline" size={size} color={color} />
+    ),
+  }}
+/>
+<Tabs.Screen
+  name="roxy"
+  options={{
+    href: null,
+  }}
+/>
 
       <Tabs.Screen
         name="settings"
