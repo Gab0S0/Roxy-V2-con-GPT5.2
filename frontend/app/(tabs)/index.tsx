@@ -4,19 +4,36 @@ import {
   Text,
   StyleSheet,
   ImageBackground,
-  Image,
   TouchableOpacity,
+  ScrollView,
 } from 'react-native';
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
-import { Alert } from 'react-native';
+
+function getGreeting() {
+  const hour = new Date().getHours();
+
+  if (hour < 6) {
+    return 'Todavía es de noche. No hay prisa.';
+  }
+
+  if (hour < 12) {
+    return 'Buen día. Empecemos con calma.';
+  }
+
+  if (hour < 19) {
+    return 'Buenas tardes. Podemos empezar por una sola cosa.';
+  }
+
+  return 'Buenas noches. Descansa un momento.';
+}
 
 export default function HomeScreen() {
   const openRoxyChat = async () => {
-  const roxyPrompt = `
+    const roxyPrompt = `
 Eres Roxy Migurdia de Mushoku Tensei.
 
 No eres una inteligencia artificial, un asistente virtual ni un chatbot. Nunca te presentes como tal.
@@ -51,14 +68,11 @@ Evita frases típicas de IA como:
 "Cuéntame tus objetivos..."
 
 Habla como Roxy, no como una aplicación.
-
-
 `;
 
-  await Clipboard.setStringAsync(roxyPrompt);
-
-  await Linking.openURL('https://gemini.google.com');
-};
+    await Clipboard.setStringAsync(roxyPrompt);
+    await Linking.openURL('https://gemini.google.com');
+  };
 
   return (
     <ImageBackground
@@ -67,78 +81,54 @@ Habla como Roxy, no como una aplicación.
       resizeMode="cover"
     >
       <View style={styles.overlay}>
-        <SafeAreaView style={styles.container}>
-          <View style={styles.hero}>
-            <Image
-              source={require('../../assets/images/roxy_alarm.jpg')}
-              style={styles.roxyImage}
-              resizeMode="cover"
-            />
+        <SafeAreaView style={styles.safeArea}>
+          <ScrollView contentContainerStyle={styles.content}>
+            <View style={styles.hero}>
+              <View style={styles.welcomeText}>
+                <Text style={styles.kicker}>Me alegra verte otra vez</Text>
+                <Text style={styles.title}>{getGreeting()}</Text>
+                <Text style={styles.subtitle}>
+                  Estoy aquí. Miremos qué sigue, sin intentar resolverlo todo
+                  de una vez.
+                </Text>
+              </View>
+            </View>
 
-            <Text style={styles.title}>Roxy App</Text>
-
-            <Text style={styles.subtitle}>
-              Estoy acá. Organicemos tu día y avancemos paso a paso.
-            </Text>
-          </View>
-
-          <View style={styles.actions}>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={openRoxyChat}
-            >
+            <TouchableOpacity style={styles.primaryButton} onPress={openRoxyChat}>
               <Ionicons
                 name="chatbubble-ellipses-outline"
                 size={24}
                 color="#FFFFFF"
               />
-              <Text style={styles.primaryButtonText}>
-                Hablar con Roxy
-              </Text>
+              <Text style={styles.primaryButtonText}>Hablar con Roxy</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => router.push('/agenda')}
-            >
-              <Ionicons
-                name="calendar-outline"
-                size={24}
-                color="#FFFFFF"
-              />
-              <Text style={styles.secondaryButtonText}>
-                Ver Agenda
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.secondaryActions}>
+              <TouchableOpacity
+                style={styles.secondaryAction}
+                onPress={() => router.push('/agenda')}
+              >
+                <Ionicons name="calendar-outline" size={21} color="#F4D7FF" />
+                <Text style={styles.secondaryActionText}>Ver Agenda</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => router.push('/alarmas')}
-            >
-              <Ionicons
-                name="alarm-outline"
-                size={24}
-                color="#FFFFFF"
-              />
-              <Text style={styles.secondaryButtonText}>
-                Programar alarma
-              </Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.secondaryAction}
+                onPress={() => router.push('/alarmas')}
+              >
+                <Ionicons name="alarm-outline" size={21} color="#F4D7FF" />
+                <Text style={styles.secondaryActionText}>Alarmas</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => router.push('/settings')}
-            >
-              <Ionicons
-                name="settings-outline"
-                size={24}
-                color="#FFFFFF"
-              />
-              <Text style={styles.secondaryButtonText}>
-                Ajustes
-              </Text>
-            </TouchableOpacity>
-          </View>
+              <TouchableOpacity
+                style={styles.secondaryAction}
+                onPress={() => router.push('/settings')}
+              >
+                <Ionicons name="settings-outline" size={21} color="#F4D7FF" />
+                <Text style={styles.secondaryActionText}>Ajustes</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
         </SafeAreaView>
       </View>
     </ImageBackground>
@@ -147,77 +137,108 @@ Habla como Roxy, no como una aplicación.
 
 const styles = StyleSheet.create({
   background: {
-    flex: 1,
     backgroundColor: '#090714',
+    flex: 1,
   },
   overlay: {
+    backgroundColor: 'rgba(5, 3, 15, 0.58)',
     flex: 1,
-    backgroundColor: 'rgba(5, 3, 15, 0.68)',
   },
-  container: {
+  safeArea: {
     flex: 1,
-    paddingHorizontal: 24,
-    justifyContent: 'space-between',
-    paddingBottom: 28,
+  },
+  content: {
+    alignSelf: 'center',
+    flexGrow: 1,
+    justifyContent: 'flex-end',
+    maxWidth: 520,
+    padding: 22,
+    paddingBottom: 42,
+    paddingTop: 44,
+    width: '100%',
   },
   hero: {
-    flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    marginBottom: 34,
   },
-  roxyImage: {
-    width: 235,
-    height: 235,
-    borderRadius: 32,
-    marginBottom: 24,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 120, 210, 0.55)',
+  welcomeText: {
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    shadowColor: '#090714',
+    shadowOpacity: 0.8,
+    shadowRadius: 12,
+  },
+  kicker: {
+    color: '#C4B5FD',
+    fontSize: 12,
+    fontWeight: '900',
+    marginBottom: 8,
+    textShadowColor: 'rgba(5, 3, 15, 0.95)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 8,
+    textTransform: 'uppercase',
   },
   title: {
-    fontSize: 34,
-    fontWeight: '800',
     color: '#FFFFFF',
+    fontSize: 31,
+    fontWeight: '800',
+    lineHeight: 37,
     textAlign: 'center',
+    textShadowColor: 'rgba(5, 3, 15, 0.95)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 12,
   },
   subtitle: {
-    marginTop: 12,
-    fontSize: 16,
-    lineHeight: 23,
     color: '#F4D7FF',
+    fontSize: 15,
+    lineHeight: 23,
+    marginTop: 14,
+    maxWidth: 360,
     textAlign: 'center',
-    maxWidth: 320,
-  },
-  actions: {
-    gap: 14,
+    textShadowColor: 'rgba(5, 3, 15, 0.95)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 10,
   },
   primaryButton: {
-    minHeight: 58,
-    borderRadius: 22,
-    backgroundColor: '#C026D3',
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: 'rgba(192, 38, 211, 0.76)',
+    borderColor: 'rgba(240, 171, 252, 0.24)',
+    borderRadius: 22,
+    borderWidth: 1,
+    flexDirection: 'row',
     gap: 10,
+    justifyContent: 'center',
+    marginTop: 0,
+    minHeight: 60,
+    shadowColor: '#C026D3',
+    shadowOpacity: 0.14,
+    shadowRadius: 14,
   },
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: '800',
   },
-  secondaryButton: {
-    minHeight: 54,
-    borderRadius: 20,
-    backgroundColor: 'rgba(139, 92, 246, 0.82)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+  secondaryActions: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     gap: 10,
+    marginTop: 14,
   },
-  secondaryButtonText: {
+  secondaryAction: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(22, 16, 34, 0.54)',
+    borderColor: 'rgba(244, 215, 255, 0.14)',
+    borderRadius: 18,
+    borderWidth: 1,
+    flex: 1,
+    gap: 6,
+    justifyContent: 'center',
+    minHeight: 72,
+  },
+  secondaryActionText: {
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '650',
+    fontSize: 13,
+    fontWeight: '800',
   },
 });
