@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { RoxyCategory } from '../data/roxyEvents';
 
+export type CategoryConfigKey = RoxyCategory | 'feriado';
+
 export const categoryConfig: Record<
-  RoxyCategory,
+  CategoryConfigKey,
   {
     label: string;
     icon: keyof typeof Ionicons.glyphMap;
@@ -57,5 +59,11 @@ export const categoryConfig: Record<
     icon: 'flag-outline',
     color: '#E879F9',
     bg: 'rgba(232, 121, 249, 0.16)',
+  },
+  feriado: {
+    label: 'Feriado',
+    icon: 'calendar-clear-outline',
+    color: '#F0ABFC',
+    bg: 'rgba(240, 171, 252, 0.14)',
   },
 };

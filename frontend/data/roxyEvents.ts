@@ -9,6 +9,7 @@ export type RoxyCategory =
   | 'objetivos';
 
 export type RoxyEventStatus = 'pending' | 'done' | 'missed';
+export type RoxyEventReminder = 'none' | 'same_day' | 'one_day_before' | 'one_hour_before';
 
 export type RoxyEvent = {
   id: string;
@@ -17,8 +18,9 @@ export type RoxyEvent = {
   time?: string;
   category: RoxyCategory;
   status: RoxyEventStatus;
-  source: 'manual' | 'google' | 'alarm';
+  source: 'manual' | 'local' | 'google' | 'alarm';
   description?: string;
+  reminder?: RoxyEventReminder;
 };
 
 export const roxyEvents: RoxyEvent[] = [

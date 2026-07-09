@@ -11,10 +11,16 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import { categoryConfig } from '../config/categories';
-import { RoxyEvent } from '../data/roxyEvents';
+
+type CalendarMonthEvent = {
+  id: string;
+  date: string;
+  category: string;
+  visibility?: 'primary' | 'subtle' | 'hidden';
+};
 
 type CalendarMonthProps = {
-  events: RoxyEvent[];
+  events: CalendarMonthEvent[];
   selectedDate: Date | string;
   onSelectDate: (date: Date) => void;
 };
@@ -26,7 +32,7 @@ type CalendarDay = {
   isCurrentMonth: boolean;
   isToday: boolean;
   isSelected: boolean;
-  events: RoxyEvent[];
+  events: CalendarMonthEvent[];
 };
 
 const MONTH_LABELS = [
@@ -84,7 +90,7 @@ function addMonths(date: Date, amount: number) {
 function getCalendarDays(
   visibleMonth: Date,
   selectedDate: Date,
-  eventsByDate: Map<string, RoxyEvent[]>
+  eventsByDate: Map<string, CalendarMonthEvent[]>
 ) {
   const monthStart = startOfMonth(visibleMonth);
   const firstWeekday = (monthStart.getDay() + 6) % 7;
@@ -112,6 +118,13 @@ function getCalendarDays(
   });
 }
 
+function getCategoryDisplay(categoryKey: string) {
+  return (
+    categoryConfig[categoryKey as keyof typeof categoryConfig] ??
+    categoryConfig.personal
+  );
+}
+
 export default function CalendarMonth({
   events,
   selectedDate,
@@ -137,9 +150,13 @@ export default function CalendarMonth({
   }, [monthTransition, visibleMonth]);
 
   const eventsByDate = useMemo(() => {
-    const grouped = new Map<string, RoxyEvent[]>();
+    const grouped = new Map<string, CalendarMonthEvent[]>();
 
     events.forEach((event) => {
+      if (event.visibility === 'hidden') {
+        return;
+      }
+
       const dateEvents = grouped.get(event.date) ?? [];
       grouped.set(event.date, [...dateEvents, event]);
     });
@@ -229,11 +246,18 @@ export default function CalendarMonth({
               style={[styles.weekRow, compact && styles.compactWeekRow]}
             >
               {week.map((day) => {
-                const visibleEvents = day.events.slice(0, 3);
-                const hiddenCount = day.events.length - visibleEvents.length;
-                const hasEvents = day.events.length > 0;
-                const isBusy = day.events.length >= 2;
-                const isVeryBusy = day.events.length >= 3;
+                const subtleEvents = day.events.filter(
+                  (event) => event.visibility === 'subtle'
+                );
+                const primaryEvents = day.events.filter(
+                  (event) => event.visibility !== 'subtle'
+                );
+                const visibleEvents = primaryEvents.slice(0, 3);
+                const hiddenCount = primaryEvents.length - visibleEvents.length;
+                const hasEvents = primaryEvents.length > 0;
+                const hasSubtleEvents = subtleEvents.length > 0;
+                const isBusy = primaryEvents.length >= 2;
+                const isVeryBusy = primaryEvents.length >= 3;
 
                 return (
                   <Pressable
@@ -247,6 +271,7 @@ export default function CalendarMonth({
                       styles.dayCell,
                       compact && styles.compactDayCell,
                       hasEvents && styles.eventDayCell,
+                      hasSubtleEvents && !hasEvents && styles.subtleDayCell,
                       isBusy && styles.busyDayCell,
                       isVeryBusy && styles.veryBusyDayCell,
                       !day.isCurrentMonth && styles.outsideMonthCell,
@@ -276,7 +301,7 @@ export default function CalendarMonth({
 
                     <View style={styles.indicatorsRow}>
                       {visibleEvents.map((event) => {
-                        const category = categoryConfig[event.category];
+                        const category = getCategoryDisplay(event.category);
 
                         return (
                           <View
@@ -285,6 +310,21 @@ export default function CalendarMonth({
                               styles.eventDot,
                               { backgroundColor: category.color },
                               isBusy && styles.busyEventDot,
+                              !day.isCurrentMonth && styles.outsideMonthDot,
+                            ]}
+                          />
+                        );
+                      })}
+
+                      {subtleEvents.slice(0, 1).map((event) => {
+                        const category = getCategoryDisplay(event.category);
+
+                        return (
+                          <View
+                            key={`${day.key}-${event.id}`}
+                            style={[
+                              styles.subtleEventDot,
+                              { backgroundColor: category.color },
                               !day.isCurrentMonth && styles.outsideMonthDot,
                             ]}
                           />
@@ -408,6 +448,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(21, 16, 35, 0.96)',
     borderColor: 'rgba(240, 171, 252, 0.18)',
   },
+  subtleDayCell: {
+    backgroundColor: 'rgba(21, 16, 35, 0.84)',
+    borderColor: 'rgba(240, 171, 252, 0.12)',
+  },
   busyDayCell: {
     backgroundColor: 'rgba(48, 29, 70, 0.72)',
     borderColor: 'rgba(192, 38, 211, 0.34)',
@@ -485,6 +529,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     height: 7,
     width: 10,
+  },
+  subtleEventDot: {
+    borderColor: 'rgba(255, 255, 255, 0.42)',
+    borderRadius: 999,
+    borderWidth: 1,
+    height: 5,
+    opacity: 0.88,
+    width: 5,
   },
   busyEventDot: {
     height: 8,
