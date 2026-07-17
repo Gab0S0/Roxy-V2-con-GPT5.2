@@ -21,15 +21,20 @@ export type AgendaEvent = {
   category: AgendaEventCategory;
   source: AgendaEventSource;
   visibility: AgendaEventVisibility;
+  dedupeKey?: string;
   description?: string;
   reminder?: AgendaReminder;
   status?: RoxyEventStatus;
   isAllDay?: boolean;
   isReadOnly?: boolean;
   externalId?: string;
+  notificationId?: string;
   metadata?: {
     holidayRegion?: string;
     calendarName?: string;
     googleCalendarId?: string;
+    calendarColor?: string;
+    primary?: boolean;
+    googleEventType?: string;
   };
 };

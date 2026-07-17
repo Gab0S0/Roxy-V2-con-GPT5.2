@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 export const roxyPhrases = {
   homeMorning: [
     'Buenos días. Podemos empezar con calma.',
@@ -156,6 +158,175 @@ export const roxyPhrases = {
     'Sigamos desde aquí.',
   ],
 };
+
+export const homeDialoguePhrases = {
+  calmDay: [
+    'Hoy no veo nada urgente. Un día así puede servir para pensar con un poco más de claridad.',
+    'El día parece despejado. No hace falta llenarlo para que valga.',
+    'No hay mucho marcado por ahora. A veces el silencio también ayuda a ordenar.',
+    'Hoy se ve liviano. Podrías dejarlo simple y cuidar un poco el ritmo.',
+    'No encuentro compromisos cerca. Eso no es un error; también es espacio.',
+    'Parece un día tranquilo. Si aparece algo importante, lo miraremos sin apuro.',
+    'Hoy no hay señales de tormenta. Aprovecha para respirar antes de decidir.',
+    'El calendario está quieto. Me parece bien no molestarlo demasiado.',
+  ],
+  singleEvent: [
+    'Hay una cosa marcada para hoy. Mejor mirarla de frente y no cargar con más de lo necesario.',
+    'Hoy tienes un compromiso. Con saber dónde empieza, ya es más fácil avanzar.',
+    'Veo una sola marca en el día. Eso permite prestarle atención sin dispersarse.',
+    'Hay algo esperando hoy. No parece enorme, pero conviene no dejarlo escondido.',
+    'Una tarea clara suele ser más amable que muchas dudas juntas.',
+    'Hoy el día señala una cosa. Miremos esa primero.',
+    'No hay demasiadas piezas sobre la mesa. Eso puede jugar a tu favor.',
+    'Tienes algo anotado para hoy. Con prepararlo un poco, alcanza.',
+  ],
+  multipleEvents: [
+    'Hoy tienes {count} compromisos. Conviene ir por partes, sin intentar sostenerlos todos a la vez.',
+    '{categories}... hoy no parece que vayas a aburrirte.',
+    'Veo varias cosas juntas para hoy. Será mejor elegir bien el primer paso.',
+    'Hoy el calendario está bastante despierto. No hace falta responderle todo de golpe.',
+    'Hay {count} marcas en el día. Ordenarlas antes de empezar puede ahorrarte cansancio.',
+    '{categories} aparecen en el mismo día. Será un pequeño ejercicio de paciencia.',
+    'Hoy hay movimiento. Si separas una cosa de la otra, se vuelve menos pesado.',
+    'No es un día vacío. Procura no tratarlo como si tuvieras cuatro manos.',
+    'Veo {count} asuntos para hoy. Primero el más cercano, después el siguiente.',
+    'El día viene con varias puertas abiertas. No tienes que cruzarlas todas al mismo tiempo.',
+  ],
+  study: [
+    'Hoy aparece estudio. Una lección entendida a medias todavía puede volverse clara.',
+    'Toca estudiar. Empieza por lo que puedas explicar con tus propias palabras.',
+    'Veo estudio en el día. No intentes dominar todo en una sola lectura.',
+    'Estudiar también es volver sobre lo difícil sin pelearse con ello.',
+    'Hoy conviene preparar la mente como antes de una lección: poco ruido y buen pulso.',
+    'Hay estudio marcado. Si algo no sale, vuelve al primer paso.',
+  ],
+  work: [
+    'Hoy aparece trabajo. Lo más útil será distinguir lo importante de lo ruidoso.',
+    'Veo trabajo en el día. Mejor cerrar una cosa con cuidado que abrir demasiadas.',
+    'Hay algo laboral marcado. Revisa lo cercano y deja lo demás en su sitio.',
+    'Trabajo, entonces. Procura no regalarle más atención de la necesaria.',
+    'Hoy el trabajo pide lugar. Dáselo, pero no le entregues todo el día.',
+    'Veo una tarea de trabajo. Si está clara, ya pesa menos.',
+  ],
+  fitness: [
+    'Hoy hay entrenamiento. No tiene que ser perfecto para contar.',
+    'Veo movimiento marcado. Escucha al cuerpo antes de exigirle respuestas.',
+    'Toca entrenar. Ir con una intención simple suele alcanzar.',
+    'Hay ejercicio en el día. No lo conviertas en castigo.',
+    'Entrenar también puede ser una forma tranquila de volver al cuerpo.',
+    'Veo entrenamiento. Hazlo posible, no heroico.',
+  ],
+  health: [
+    'Hoy hay algo de salud. Revisa la hora y sal con margen.',
+    'Veo una cita de salud. Es mejor tratar estas cosas con atención, no con miedo.',
+    'Esto parece importante para tu cuidado. No lo dejes perdido entre otras tareas.',
+    'Hay salud en el calendario. Lleva lo necesario y evita correr al final.',
+    'Hoy conviene escuchar al cuerpo con un poco más de respeto.',
+    'Veo algo médico o de cuidado. Prepararlo antes puede evitar errores pequeños.',
+  ],
+  tomorrowEarly: [
+    'Mañana tienes algo temprano. Sería prudente dejar la mañana un poco preparada.',
+    'Veo un compromiso temprano mañana. Esta noche no debería robarte demasiado sueño.',
+    'Mañana empieza pronto. Deja lo necesario a mano y no confíes solo en la memoria.',
+    'Hay algo temprano esperando mañana. Mejor no llegar a él desde el desorden.',
+    'Mañana tendrás que levantarte con dirección. Un pequeño preparativo bastará.',
+    'El primer tramo de mañana ya está ocupado. Conviene tratarlo con cuidado desde hoy.',
+  ],
+  tomorrowEvents: [
+    'Mañana tienes algo anotado. No hace falta resolverlo ahora, solo no perderlo de vista.',
+    'Veo movimiento para mañana. Tal vez hoy convenga dejar una parte simple.',
+    'Mañana no está vacío. Preparar un detalle hoy puede ayudarte después.',
+    'Hay algo esperando mañana. Lo miraremos mejor cuando esté más cerca.',
+    'Mañana trae un compromiso. Por ahora basta con recordarlo.',
+    'El calendario ya dejó una señal para mañana. No parece urgente, pero sí conviene verla.',
+  ],
+  night: [
+    'Ya es de noche. Si algo queda pendiente, que sea pequeño y claro.',
+    'La noche no es buen lugar para pelear con todo el día.',
+    'Si el día fue largo, no le exijas una última victoria.',
+    'A esta hora conviene bajar la voz, incluso por dentro.',
+    'Todavía puedes dejar algo ordenado, pero sin convertirlo en castigo.',
+    'La noche sirve para recuperar fuerzas. Eso también es parte del camino.',
+  ],
+  holiday: [
+    'Hoy es feriado. Parece un buen momento para ir un poco más despacio.',
+    'El día tiene otro ritmo. No hace falta tratarlo como uno común.',
+    'Hoy el calendario baja la voz. Tal vez sea sensato escucharlo.',
+    'Es feriado. Si puedes descansar un poco, no lo consideres tiempo perdido.',
+  ],
+  returnAfterDays: [
+    'Me alegra verte otra vez. No voy a reprocharte la ausencia.',
+    'Pasaron algunos días. Podemos retomar desde aquí, sin hacer ruido.',
+    'Volver también cuenta. Primero miremos lo que está más cerca.',
+    'Has estado fuera un tiempo. No hace falta explicarlo todo para seguir.',
+  ],
+  weekend: [
+    'Es fin de semana. Sería extraño tratarlo exactamente como un día común.',
+    'Hoy el ritmo puede ser distinto. No todo necesita una razón importante.',
+    'El fin de semana deja un poco más de aire. Úsalo con cuidado.',
+    'Parece un día para bajar medio paso. A veces eso basta.',
+  ],
+  birthdayToday: [
+    'Hoy aparece tu cumpleaños. Espero que el día sea amable contigo.',
+    'El calendario dice que hoy es tu cumpleaños. Me alegra poder verte aquí.',
+    'Hoy es una fecha tuya. No hace falta hacerla perfecta para que importe.',
+    'Tu cumpleaños está marcado hoy. Ojalá encuentres un momento que se sienta propio.',
+  ],
+};
+
+export type HomeDialoguePhraseGroup = keyof typeof homeDialoguePhrases;
+
+const HOME_LAST_PHRASE_STORAGE_KEY = '@roxy/home_dialogue_last_phrase_by_group';
+
+type PhraseVariables = Record<string, string | number | undefined>;
+
+function hashText(value: string) {
+  return value.split('').reduce((hash, character) => {
+    return (hash * 31 + character.charCodeAt(0)) >>> 0;
+  }, 0);
+}
+
+function applyPhraseVariables(phrase: string, variables: PhraseVariables = {}) {
+  return Object.entries(variables).reduce((nextPhrase, [key, value]) => {
+    return nextPhrase.replaceAll(`{${key}}`, String(value ?? ''));
+  }, phrase);
+}
+
+async function getStoredHomeLastPhrases() {
+  try {
+    const storedValue = await AsyncStorage.getItem(HOME_LAST_PHRASE_STORAGE_KEY);
+
+    return storedValue ? (JSON.parse(storedValue) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function getStableHomeRoxyPhrase(
+  group: HomeDialoguePhraseGroup,
+  contextKey: string,
+  variables?: PhraseVariables
+) {
+  const phrases = homeDialoguePhrases[group];
+  const storedPhrases = await getStoredHomeLastPhrases();
+  let index = hashText(`${group}:${contextKey}`) % phrases.length;
+  let phrase = applyPhraseVariables(phrases[index], variables);
+
+  if (phrases.length > 1 && storedPhrases[group] === phrase) {
+    index = (index + 1) % phrases.length;
+    phrase = applyPhraseVariables(phrases[index], variables);
+  }
+
+  await AsyncStorage.setItem(
+    HOME_LAST_PHRASE_STORAGE_KEY,
+    JSON.stringify({
+      ...storedPhrases,
+      [group]: phrase,
+    })
+  );
+
+  return phrase;
+}
 
 export function getRandomRoxyPhrase(
   group: keyof typeof roxyPhrases

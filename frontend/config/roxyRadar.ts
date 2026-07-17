@@ -1,43 +1,131 @@
-import { RoxyEvent } from '../data/roxyEvents';
+import { RoxyCategory } from '../data/roxyEvents';
 
-export function getWeeklyRadarMessage(events: RoxyEvent[]) {
-  const today = new Date();
-  const inSevenDays = new Date();
-  inSevenDays.setDate(today.getDate() + 7);
+type RadarEvent = {
+  title: string;
+  date: string;
+  category: RoxyCategory | 'feriado' | 'sistema';
+};
 
-  const upcomingWeek = events.filter((event) => {
-    const eventDate = new Date(event.date);
-    return eventDate >= today && eventDate <= inSevenDays;
-  });
+type SelectedDayRadarOptions = {
+  selectedDateKey: string;
+  selectedEvents: RadarEvent[];
+  selectedHolidayEvents: RadarEvent[];
+  upcomingEvents?: RadarEvent[];
+};
 
-  const healthEvents = upcomingWeek.filter((e) => e.category === 'salud');
-  const studyEvents = upcomingWeek.filter((e) => e.category === 'estudio');
-  const fitnessEvents = upcomingWeek.filter((e) => e.category === 'fitness');
+const categoryNames: Record<RoxyCategory | 'feriado' | 'sistema', string> = {
+  trabajo: 'trabajo',
+  estudio: 'estudio',
+  salud: 'salud',
+  fitness: 'entrenamiento',
+  personal: 'algo personal',
+  hogar: 'casa',
+  gaming: 'descanso',
+  objetivos: 'un objetivo',
+  feriado: 'feriado',
+  sistema: 'algo pendiente',
+};
 
-  if (upcomingWeek.length === 0) {
-    return 'Esta semana parece tranquila. Aprovechá para avanzar con algo que venís postergando 💙';
-  }
+function formatDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
 
-  if (upcomingWeek.length >= 6) {
-    return 'Esta semana viene cargada. Yo no agregaría demasiadas cosas más.';
-  }
-
-  if (healthEvents.length > 0) {
-    return 'Tenés algo de salud esta semana. Revisá bien horarios y cómo vas a llegar.';
-  }
-
-  if (studyEvents.length >= 2) {
-    return 'Veo bastante estudio esta semana. Conviene separar bloques cortos y no dejar todo para último momento.';
-  }
-
-  if (fitnessEvents.length > 0) {
-    return 'Hay entrenamiento marcado. No lo canceles tan fácil 😠';
-  }
-
-  return 'Tenés algunas cosas por delante, pero nada imposible. Vamos de a una.';
+  return `${year}-${month}-${day}`;
 }
 
-export function getLongTermReminderMessage(events: RoxyEvent[]) {
+function getDayVariant(dateKey: string) {
+  return dateKey
+    .split('')
+    .reduce((total, character) => total + character.charCodeAt(0), 0);
+}
+
+function formatCount(count: number) {
+  const words: Record<number, string> = {
+    2: 'dos',
+    3: 'tres',
+    4: 'cuatro',
+    5: 'cinco',
+  };
+
+  return words[count] ?? String(count);
+}
+
+function isToday(dateKey: string) {
+  return dateKey === formatDateKey(new Date());
+}
+
+function getSingleEventMessage(event: RadarEvent, selectedDateKey: string) {
+  const todayPrefix = isToday(selectedDateKey) ? 'Hoy' : 'Ese día';
+
+  switch (event.category) {
+    case 'trabajo':
+      return `${todayPrefix} hay algo de trabajo. Conviene dejarlo claro y avanzar con calma.`;
+    case 'estudio':
+      return `${todayPrefix} toca estudiar. Empezar por una parte pequeña suele ayudar.`;
+    case 'salud':
+      return `${todayPrefix} hay algo de salud. Revisa horario y salida con tiempo.`;
+    case 'fitness':
+      return `${todayPrefix} hay entrenamiento. Si vas con calma, también cuenta.`;
+    case 'hogar':
+      return `${todayPrefix} hay algo de casa. Mejor resolverlo sin apuro.`;
+    case 'gaming':
+      return `${todayPrefix} hay un momento de descanso. No todo debe ser obligación.`;
+    case 'objetivos':
+      return `${todayPrefix} hay un objetivo marcado. Podemos mirarlo de a poco.`;
+    default:
+      return `${todayPrefix} tienes algo anotado. Miremos eso primero.`;
+  }
+}
+
+function getMultipleEventsMessage(events: RadarEvent[], selectedDateKey: string) {
+  const uniqueCategories = Array.from(
+    new Set(events.map((event) => categoryNames[event.category]))
+  ).filter(Boolean);
+
+  if (uniqueCategories.length >= 3) {
+    return `${uniqueCategories.slice(0, 3).join(', ')}... será un día bastante movido.`;
+  }
+
+  const todayPrefix = isToday(selectedDateKey) ? 'Hoy' : 'Ese día';
+
+  return `${todayPrefix} tienes ${formatCount(events.length)} compromisos. Conviene ir uno por uno.`;
+}
+
+export function getSelectedDayRadarMessage({
+  selectedDateKey,
+  selectedEvents,
+  selectedHolidayEvents,
+  upcomingEvents = [],
+}: SelectedDayRadarOptions) {
+  if (selectedHolidayEvents.length > 0) {
+    return isToday(selectedDateKey)
+      ? 'Hoy es feriado. Parece un buen momento para ir un poco más despacio.'
+      : 'Ese día es feriado. Tal vez convenga dejarlo un poco más liviano.';
+  }
+
+  if (selectedEvents.length > 1) {
+    return getMultipleEventsMessage(selectedEvents, selectedDateKey);
+  }
+
+  if (selectedEvents.length === 1) {
+    return getSingleEventMessage(selectedEvents[0], selectedDateKey);
+  }
+
+  const emptyMessages = [
+    'Ese día parece tranquilo. No todos los espacios tienen que llenarse.',
+    'No veo nada marcado para ese día. Puede ser un buen momento para respirar.',
+    'Ese día está despejado. A veces eso también es útil.',
+  ];
+
+  if (upcomingEvents.length === 0) {
+    return emptyMessages[getDayVariant(selectedDateKey) % emptyMessages.length];
+  }
+
+  return emptyMessages[getDayVariant(selectedDateKey) % emptyMessages.length];
+}
+
+export function getLongTermReminderMessage(events: RadarEvent[]) {
   const today = new Date();
 
   const farEvents = events.filter((event) => {
@@ -57,5 +145,5 @@ export function getLongTermReminderMessage(events: RoxyEvent[]) {
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
   )[0];
 
-  return `Tenés algo lejano guardado: ${nextFarEvent.title}. No se va a escapar, yo lo tengo visto 💙`;
+  return `Tienes algo lejano guardado: ${nextFarEvent.title}. No se va a escapar, lo tengo visto.`;
 }

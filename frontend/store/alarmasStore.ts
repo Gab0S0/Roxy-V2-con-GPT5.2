@@ -1,86 +1,103 @@
-import { create } from 'zustand';
-import axios from 'axios';
-import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
-import { getUserId } from '../utils/userId';
+import { create } from 'zustand';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+import type { RoxyAlarm, RoxyAlarmStorageSchemaV1 } from '../types/alarm';
 
-interface Alarma {
-  id: string;
-  label: string;
-  datetime: string;
-  repeatPattern?: string | null;
-  repeatDays?: string[];
-  isActive: boolean;
-  sound?: string;
-  motivationalMessage?: string;
-  notificationId?: string;
-}
+export const ROXY_ALARMS_STORAGE_KEY = 'roxy_alarms_v1';
+
+type AlarmInput = Omit<RoxyAlarm, 'id' | 'createdAt' | 'updatedAt' | 'nextTriggerAt'>;
+type AlarmUpdate = Partial<Omit<RoxyAlarm, 'id' | 'createdAt'>>;
 
 interface AlarmasState {
-  alarmas: Alarma[];
+  alarmas: RoxyAlarm[];
   isLoading: boolean;
   error: string | null;
   loadAlarmas: () => Promise<void>;
-  createAlarma: (alarma: Omit<Alarma, 'id' | 'isActive'>) => Promise<void>;
-  updateAlarma: (id: string, updates: Partial<Alarma>) => Promise<void>;
+  createAlarma: (alarm: AlarmInput) => Promise<RoxyAlarm | null>;
+  updateAlarma: (id: string, updates: AlarmUpdate) => Promise<RoxyAlarm | null>;
   deleteAlarma: (id: string) => Promise<void>;
   toggleAlarma: (id: string) => Promise<void>;
 }
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+const createAlarmId = () =>
+  `alarm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
-const scheduleNotification = async (alarma: Alarma): Promise<string | null> => {
-  try {
-    const { status } = await Notifications.requestPermissionsAsync();
-    if (status !== 'granted') {
-      console.log('Notification permissions not granted');
-      return null;
-    }
+const normalizeTimePart = (value: number, max: number) =>
+  Number.isFinite(value) ? Math.max(0, Math.min(max, Math.floor(value))) : 0;
 
-    const alarmDate = new Date(alarma.datetime);
-    const now = new Date();
-    const triggerTime = alarmDate.getTime() - now.getTime();
+const normalizeRepeatDays = (repeatDays: number[] = []) =>
+  Array.from(
+    new Set(
+      repeatDays
+        .map((day) => normalizeTimePart(day, 6))
+        .filter((day) => day >= 0 && day <= 6)
+    )
+  ).sort((a, b) => a - b);
 
-    if (triggerTime <= 0) {
-      console.log('Alarm time is in the past');
-      return null;
-    }
-
-    const notificationId = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: '⏰ ' + alarma.label,
-        body: alarma.motivationalMessage || '¡Es hora! Estoy contigo, vamos juntas 💙✨',
-        sound: true,
-        priority: Notifications.AndroidNotificationPriority.MAX,
-      },
-      trigger: {
-        seconds: Math.floor(triggerTime / 1000),
-      },
-    });
-
-    return notificationId;
-  } catch (error) {
-    console.error('Error scheduling notification:', error);
-    return null;
+const getNextTriggerAt = (alarm: Pick<RoxyAlarm, 'hour' | 'minute' | 'repeatDays' | 'enabled'>) => {
+  if (!alarm.enabled) {
+    return undefined;
   }
+
+  const now = new Date();
+  const repeatDays = normalizeRepeatDays(alarm.repeatDays);
+  const candidates: Date[] = [];
+
+  for (let offset = 0; offset <= 7; offset += 1) {
+    const candidate = new Date(now);
+    candidate.setDate(now.getDate() + offset);
+    candidate.setHours(alarm.hour, alarm.minute, 0, 0);
+
+    if (repeatDays.length > 0 && !repeatDays.includes(candidate.getDay())) {
+      continue;
+    }
+
+    if (candidate.getTime() > now.getTime()) {
+      candidates.push(candidate);
+    }
+  }
+
+  return candidates[0]?.toISOString();
 };
 
-const cancelNotification = async (notificationId: string) => {
-  try {
-    await Notifications.cancelScheduledNotificationAsync(notificationId);
-    console.log('✅ Notification cancelled:', notificationId);
-  } catch (error) {
-    console.error('Error canceling notification:', error);
+const normalizeAlarm = (alarm: RoxyAlarm): RoxyAlarm => {
+  const normalized: RoxyAlarm = {
+    ...alarm,
+    hour: normalizeTimePart(alarm.hour, 23),
+    minute: normalizeTimePart(alarm.minute, 59),
+    repeatDays: normalizeRepeatDays(alarm.repeatDays),
+    snoozeMinutes: normalizeTimePart(alarm.snoozeMinutes || 5, 60),
+    sound: alarm.sound === 'roxy_theme' ? 'roxy_theme' : 'default',
+    vibrate: alarm.vibrate !== false,
+  };
+
+  return {
+    ...normalized,
+    nextTriggerAt: getNextTriggerAt(normalized),
+  };
+};
+
+const readStoredAlarms = async (): Promise<RoxyAlarm[]> => {
+  const raw = await AsyncStorage.getItem(ROXY_ALARMS_STORAGE_KEY);
+  if (!raw) {
+    return [];
   }
+
+  const parsed = JSON.parse(raw) as Partial<RoxyAlarmStorageSchemaV1>;
+  if (parsed.version !== 1 || !Array.isArray(parsed.alarms)) {
+    return [];
+  }
+
+  return parsed.alarms.map(normalizeAlarm);
+};
+
+const writeStoredAlarms = async (alarms: RoxyAlarm[]) => {
+  const payload: RoxyAlarmStorageSchemaV1 = {
+    version: 1,
+    alarms,
+  };
+
+  await AsyncStorage.setItem(ROXY_ALARMS_STORAGE_KEY, JSON.stringify(payload));
 };
 
 const useAlarmasStore = create<AlarmasState>((set, get) => ({
@@ -91,154 +108,82 @@ const useAlarmasStore = create<AlarmasState>((set, get) => ({
   loadAlarmas: async () => {
     set({ isLoading: true, error: null });
     try {
-      const userId = await getUserId();
-      const url = `${API_URL}/api/alarmas`;
-      console.log('🔵 [ALARMAS] Cargando alarmas:', { url, userId });
-      
-      const response = await axios.get(url, {
-        params: { userId }
-      });
-      
-      console.log('✅ [ALARMAS] Alarmas cargadas:', response.data.length, 'alarmas');
-      
-      const alarmasFromServer = response.data;
-
-      // Load local notification IDs
-      const alarmasConNotificaciones = await Promise.all(
-        alarmasFromServer.map(async (alarma: Alarma) => {
-          const stored = await AsyncStorage.getItem(`alarm_${alarma.id}`);
-          if (stored) {
-            const data = JSON.parse(stored);
-            return { ...alarma, notificationId: data.notificationId };
-          }
-          return alarma;
-        })
-      );
-
-      set({ alarmas: alarmasConNotificaciones, isLoading: false });
+      const alarms = await readStoredAlarms();
+      await writeStoredAlarms(alarms);
+      set({ alarmas: alarms, isLoading: false });
     } catch (error) {
-      console.error('Error loading alarms:', error);
-      set({ error: 'Error al cargar alarmas', isLoading: false });
+      console.error('Error loading local alarms:', error);
+      set({ error: 'No pude cargar las alarmas guardadas.', isLoading: false });
     }
   },
 
-  createAlarma: async (alarmaData) => {
+  createAlarma: async (alarmInput) => {
     set({ isLoading: true, error: null });
     try {
-      const userId = await getUserId();
-      const response = await axios.post(`${API_URL}/api/alarmas`, alarmaData, {
-        params: { userId }
+      const now = new Date().toISOString();
+      const alarm = normalizeAlarm({
+        ...alarmInput,
+        id: createAlarmId(),
+        createdAt: now,
+        updatedAt: now,
       });
-      const newAlarma = response.data;
-
-      // Schedule notification
-      const notificationId = await scheduleNotification(newAlarma);
-      if (notificationId) {
-        await AsyncStorage.setItem(
-          `alarm_${newAlarma.id}`,
-          JSON.stringify({ notificationId })
-        );
-        newAlarma.notificationId = notificationId;
-      }
-
-      set((state) => ({
-        alarmas: [...state.alarmas, newAlarma],
-        isLoading: false,
-      }));
+      const alarms = [...get().alarmas, alarm];
+      await writeStoredAlarms(alarms);
+      set({ alarmas: alarms, isLoading: false });
+      return alarm;
     } catch (error) {
-      console.error('Error creating alarm:', error);
-      set({ error: 'Error al crear alarma', isLoading: false });
+      console.error('Error creating local alarm:', error);
+      set({ error: 'No pude guardar la alarma.', isLoading: false });
+      return null;
     }
   },
 
   updateAlarma: async (id, updates) => {
     set({ isLoading: true, error: null });
     try {
-      const userId = await getUserId();
-      const response = await axios.put(`${API_URL}/api/alarmas/${id}`, updates, {
-        params: { userId }
+      let updatedAlarm: RoxyAlarm | null = null;
+      const alarms = get().alarmas.map((alarm) => {
+        if (alarm.id !== id) {
+          return alarm;
+        }
+
+        updatedAlarm = normalizeAlarm({
+          ...alarm,
+          ...updates,
+          updatedAt: new Date().toISOString(),
+        });
+        return updatedAlarm;
       });
-      const updatedAlarma = response.data;
 
-      // Reschedule notification if active
-      if (updatedAlarma.isActive) {
-        const stored = await AsyncStorage.getItem(`alarm_${id}`);
-        if (stored) {
-          const data = JSON.parse(stored);
-          if (data.notificationId) {
-            await cancelNotification(data.notificationId);
-          }
-        }
-        const notificationId = await scheduleNotification(updatedAlarma);
-        if (notificationId) {
-          await AsyncStorage.setItem(
-            `alarm_${id}`,
-            JSON.stringify({ notificationId })
-          );
-          updatedAlarma.notificationId = notificationId;
-        }
-      }
-
-      set((state) => ({
-        alarmas: state.alarmas.map((a) =>
-          a.id === id ? updatedAlarma : a
-        ),
-        isLoading: false,
-      }));
+      await writeStoredAlarms(alarms);
+      set({ alarmas: alarms, isLoading: false });
+      return updatedAlarm;
     } catch (error) {
-      console.error('Error updating alarm:', error);
-      set({ error: 'Error al actualizar alarma', isLoading: false });
+      console.error('Error updating local alarm:', error);
+      set({ error: 'No pude actualizar la alarma.', isLoading: false });
+      return null;
     }
   },
 
   deleteAlarma: async (id) => {
     set({ isLoading: true, error: null });
     try {
-      // Cancel notification
-      const stored = await AsyncStorage.getItem(`alarm_${id}`);
-      if (stored) {
-        const data = JSON.parse(stored);
-        if (data.notificationId) {
-          await cancelNotification(data.notificationId);
-        }
-        await AsyncStorage.removeItem(`alarm_${id}`);
-      }
-
-      const userId = await getUserId();
-      await axios.delete(`${API_URL}/api/alarmas/${id}`, {
-        params: { userId }
-      });
-      set((state) => ({
-        alarmas: state.alarmas.filter((a) => a.id !== id),
-        isLoading: false,
-      }));
+      const alarms = get().alarmas.filter((alarm) => alarm.id !== id);
+      await writeStoredAlarms(alarms);
+      set({ alarmas: alarms, isLoading: false });
     } catch (error) {
-      console.error('Error deleting alarm:', error);
-      set({ error: 'Error al eliminar alarma', isLoading: false });
+      console.error('Error deleting local alarm:', error);
+      set({ error: 'No pude borrar la alarma.', isLoading: false });
     }
   },
 
   toggleAlarma: async (id) => {
-    const alarma = get().alarmas.find((a) => a.id === id);
-    if (!alarma) return;
-
-    const newActiveState = !alarma.isActive;
-
-    // ✅ REPROGRAMACIÓN LIMPIA
-    if (newActiveState) {
-      // Activar: reprogramar desde cero
-      await get().updateAlarma(id, { isActive: true });
-    } else {
-      // Desactivar: cancelar notificación
-      const stored = await AsyncStorage.getItem(`alarm_${id}`);
-      if (stored) {
-        const data = JSON.parse(stored);
-        if (data.notificationId) {
-          await cancelNotification(data.notificationId);
-        }
-      }
-      await get().updateAlarma(id, { isActive: false });
+    const alarm = get().alarmas.find((item) => item.id === id);
+    if (!alarm) {
+      return;
     }
+
+    await get().updateAlarma(id, { enabled: !alarm.enabled });
   },
 }));
 

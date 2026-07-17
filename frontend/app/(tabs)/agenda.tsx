@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -12,23 +12,22 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import CalendarMonth from '../../components/CalendarMonth';
 import { categoryConfig } from '../../config/categories';
-import { getWeeklyRadarMessage } from '../../config/roxyRadar';
+import { getSelectedDayRadarMessage } from '../../config/roxyRadar';
 import {
   RoxyCategory,
-  RoxyEvent,
   RoxyEventReminder,
-  roxyEvents,
 } from '../../data/roxyEvents';
-import { holidayEvents } from '../../data/holidayEvents';
 import {
+  useAgendaEvents,
   CreateRoxyEventInput,
   UpdateRoxyEventInput,
-  useManualRoxyEvents,
-} from '../../store/roxyEventsStore';
+} from '../../services/agendaEventsService';
+import { AgendaEvent } from '../../types/agenda';
 
 const CATEGORY_OPTIONS: RoxyCategory[] = [
   'trabajo',
@@ -72,6 +71,17 @@ function formatShortDate(dateKey: string) {
   return `${day}/${month}`;
 }
 
+function formatSyncTime(date: Date | null) {
+  if (!date) {
+    return '';
+  }
+
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+
+  return `${hours}:${minutes}`;
+}
+
 function getDaysUntil(dateKey: string) {
   const today = new Date();
   const todayStart = new Date(
@@ -86,22 +96,115 @@ function getDaysUntil(dateKey: string) {
   );
 }
 
-function isPriorityCategory(event: RoxyEvent) {
-  return event.category === 'salud' || event.category === 'estudio';
+function normalizeAgendaText(value?: string) {
+  return (value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
 }
 
-function isEditableEvent(event: RoxyEvent) {
-  return event.source === 'local';
+function compareAgendaEventsByDateTime(a: AgendaEvent, b: AgendaEvent) {
+  const dateDiff =
+    parseEventDate(a.date).getTime() - parseEventDate(b.date).getTime();
+
+  if (dateDiff !== 0) {
+    return dateDiff;
+  }
+
+  return (a.time ?? '').localeCompare(b.time ?? '');
+}
+
+function isGoogleBirthdayEvent(event: AgendaEvent) {
+  if (event.source !== 'google') {
+    return false;
+  }
+
+  const calendarIdentity = normalizeAgendaText(
+    `${event.metadata?.googleCalendarId ?? ''} ${event.metadata?.calendarName ?? ''}`
+  );
+
+  return (
+    event.metadata?.googleEventType === 'birthday' ||
+    calendarIdentity.includes('birthday') ||
+    calendarIdentity.includes('cumple') ||
+    calendarIdentity.includes('#contacts')
+  );
+}
+
+function shouldShowInUpcoming(event: AgendaEvent) {
+  if (event.source === 'holiday' || event.visibility !== 'primary') {
+    return false;
+  }
+
+  const daysUntil = getDaysUntil(event.date);
+
+  if (daysUntil < 0 || daysUntil > 15) {
+    return false;
+  }
+
+  if (isGoogleBirthdayEvent(event)) {
+    return daysUntil <= 7;
+  }
+
+  return true;
+}
+
+function formatUpcomingGroupLabel(dateKey: string) {
+  const daysUntil = getDaysUntil(dateKey);
+
+  if (daysUntil === 0) {
+    return 'Hoy';
+  }
+
+  if (daysUntil === 1) {
+    return 'Mañana';
+  }
+
+  const date = parseEventDate(dateKey);
+
+  return new Intl.DateTimeFormat('es', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+  }).format(date);
+}
+
+function groupEventsByDate(events: AgendaEvent[]) {
+  return events.reduce<{ date: string; events: AgendaEvent[] }[]>(
+    (groups, event) => {
+      const existingGroup = groups.find((group) => group.date === event.date);
+
+      if (existingGroup) {
+        existingGroup.events.push(event);
+        return groups;
+      }
+
+      groups.push({ date: event.date, events: [event] });
+      return groups;
+    },
+    []
+  );
+}
+
+function isEditableEvent(event: AgendaEvent) {
+  return (
+    (event.source === 'local' || event.source === 'google') &&
+    !event.isReadOnly
+  );
+}
+
+function getEventCategory(event: AgendaEvent) {
+  return categoryConfig[event.category as keyof typeof categoryConfig];
 }
 
 function EventCard({
   event,
   onPress,
 }: {
-  event: RoxyEvent;
+  event: AgendaEvent;
   onPress?: () => void;
 }) {
-  const category = categoryConfig[event.category];
+  const category = getEventCategory(event);
 
   return (
     <Pressable
@@ -150,12 +253,11 @@ function UpcomingEventCard({
   event,
   onPress,
 }: {
-  event: RoxyEvent;
+  event: AgendaEvent;
   onPress?: () => void;
 }) {
-  const category = categoryConfig[event.category];
+  const category = getEventCategory(event);
   const daysUntil = getDaysUntil(event.date);
-  const priority = isPriorityCategory(event);
   const isSoon = daysUntil >= 0 && daysUntil <= 7;
 
   return (
@@ -164,11 +266,7 @@ function UpcomingEventCard({
       onPress={onPress}
       style={({ pressed }) => [
         styles.upcomingCard,
-        priority && styles.priorityUpcomingCard,
-        isSoon && styles.soonUpcomingCard,
-        onPress && styles.editableCard,
         pressed && styles.pressedCard,
-        { borderColor: priority ? category.color : 'rgba(255, 255, 255, 0.09)' },
       ]}
     >
       <View style={styles.upcomingDateBox}>
@@ -192,13 +290,6 @@ function UpcomingEventCard({
             </View>
           ) : null}
 
-          {priority ? (
-            <View style={[styles.priorityChip, { backgroundColor: category.bg }]}>
-              <Text style={[styles.priorityChipText, { color: category.color }]}>
-                atento
-              </Text>
-            </View>
-          ) : null}
         </View>
 
         <Text style={styles.upcomingTitle}>{event.title}</Text>
@@ -217,13 +308,16 @@ function UpcomingEventCard({
 type EventFormModalProps = {
   visible: boolean;
   selectedDateKey: string;
-  editingEvent?: RoxyEvent | null;
+  editingEvent?: AgendaEvent | null;
   onClose: () => void;
-  onCreateEvent: (event: CreateRoxyEventInput) => Promise<void>;
+  onCreateEvent: (
+    event: CreateRoxyEventInput,
+    options?: { forceLocal?: boolean }
+  ) => Promise<void>;
   onUpdateEvent: (
     eventId: string,
     event: UpdateRoxyEventInput
-  ) => Promise<RoxyEvent | undefined>;
+  ) => Promise<AgendaEvent | undefined>;
   onDeleteEvent: (eventId: string) => Promise<boolean>;
 };
 
@@ -243,75 +337,131 @@ function EventFormModal({
   const [description, setDescription] = useState('');
   const [reminder, setReminder] = useState<RoxyEventReminder>('none');
   const [error, setError] = useState('');
+  const [canSaveLocalFallback, setCanSaveLocalFallback] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const isEditing = Boolean(editingEvent);
+  const isGoogleEvent = editingEvent?.source === 'google';
 
   useEffect(() => {
     if (visible) {
       setTitle(editingEvent?.title ?? '');
       setDate(editingEvent?.date ?? selectedDateKey);
       setTime(editingEvent?.time ?? '');
-      setCategory(editingEvent?.category ?? 'personal');
+      setCategory((editingEvent?.category as RoxyCategory) ?? 'personal');
       setDescription(editingEvent?.description ?? '');
       setReminder(editingEvent?.reminder ?? 'none');
       setError('');
+      setCanSaveLocalFallback(false);
       setIsSaving(false);
     }
   }, [editingEvent, selectedDateKey, visible]);
 
-  const saveEvent = async () => {
+  const buildEventInput = () => ({
+    title,
+    date: date.trim(),
+    time,
+    category,
+    description,
+    reminder,
+  });
+
+  const validateEventInput = () => {
     if (!title.trim()) {
-      setError('El título es necesario.');
-      return;
+      setError('El titulo es necesario.');
+      return false;
     }
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
       setError('Usa una fecha con formato YYYY-MM-DD.');
-      return;
+      return false;
     }
 
     if (time.trim() && !/^\d{2}:\d{2}$/.test(time.trim())) {
       setError('Usa una hora con formato HH:mm.');
+      return false;
+    }
+
+    return true;
+  };
+
+  const saveEventWithSync = async () => {
+    if (!validateEventInput()) {
+      return;
+    }
+
+    setError('');
+    setCanSaveLocalFallback(false);
+    setIsSaving(true);
+
+    try {
+      if (editingEvent) {
+        await onUpdateEvent(editingEvent.id, buildEventInput());
+      } else {
+        await onCreateEvent(buildEventInput());
+      }
+
+      onClose();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : 'No se pudo guardar este evento.'
+      );
+      setCanSaveLocalFallback(true);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const saveOnlyOnDevice = async () => {
+    if (!validateEventInput()) {
       return;
     }
 
     setError('');
     setIsSaving(true);
 
-    const eventInput = {
-      title,
-      date: date.trim(),
-      time,
-      category,
-      description,
-      reminder,
-    };
-
-    if (editingEvent) {
-      await onUpdateEvent(editingEvent.id, eventInput);
-    } else {
-      await onCreateEvent(eventInput);
+    try {
+      await onCreateEvent(buildEventInput(), { forceLocal: true });
+      onClose();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : 'No se pudo guardar este evento en este dispositivo.'
+      );
+    } finally {
+      setIsSaving(false);
     }
-
-    setIsSaving(false);
-    onClose();
   };
+
 
   const deleteCurrentEvent = async () => {
     if (!editingEvent) {
       return;
     }
 
+    setError('');
     setIsSaving(true);
-    const deleted = await onDeleteEvent(editingEvent.id);
-    setIsSaving(false);
 
-    if (deleted) {
-      onClose();
-      return;
+    try {
+      const deleted = await onDeleteEvent(editingEvent.id);
+
+      if (deleted) {
+        onClose();
+        return;
+      }
+
+      setError('No se pudo eliminar este evento.');
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : 'No se pudo eliminar este evento.'
+      );
+    } finally {
+      setIsSaving(false);
     }
-
-    setError('No se pudo eliminar este evento.');
   };
 
   const confirmDelete = () => {
@@ -360,7 +510,11 @@ function EventFormModal({
           <View style={styles.modalHeader}>
             <View>
               <Text style={styles.modalEyebrow}>
-                {isEditing ? 'Evento local' : 'Nuevo evento'}
+                {isGoogleEvent
+                  ? 'Evento de Google'
+                  : isEditing
+                    ? 'Evento local'
+                    : 'Nuevo evento'}
               </Text>
               <Text style={styles.modalTitle}>
                 {isEditing ? 'Editar evento' : 'Agregar evento'}
@@ -472,9 +626,25 @@ function EventFormModal({
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
+          {canSaveLocalFallback ? (
+            <Pressable
+              disabled={isSaving}
+              onPress={saveOnlyOnDevice}
+              style={[
+                styles.localFallbackButton,
+                isSaving && styles.disabledButton,
+              ]}
+            >
+              <Ionicons name="phone-portrait-outline" size={18} color="#F0ABFC" />
+              <Text style={styles.localFallbackButtonText}>
+                Guardar solo en este dispositivo
+              </Text>
+            </Pressable>
+          ) : null}
+
           <Pressable
             disabled={isSaving}
-            onPress={saveEvent}
+            onPress={saveEventWithSync}
             style={[styles.saveButton, isSaving && styles.disabledButton]}
           >
             <Ionicons name="checkmark" size={20} color="#FFFFFF" />
@@ -506,23 +676,26 @@ function EventFormModal({
 export default function AgendaScreen() {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [showEventForm, setShowEventForm] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<RoxyEvent | null>(null);
+  const [editingEvent, setEditingEvent] = useState<AgendaEvent | null>(null);
   const {
-    events: manualEvents,
+    allEvents,
+    primaryEvents,
+    holidayEvents,
     addEvent,
     updateEvent,
     deleteEvent,
-  } = useManualRoxyEvents();
+    refreshGoogleEvents,
+    isRefreshingGoogle,
+    googleLastSync,
+    googleError,
+  } = useAgendaEvents({ includeGoogle: true });
   const { width } = useWindowDimensions();
   const isWideLayout = width >= 820;
 
-  const allEvents = useMemo(
-    () => [...roxyEvents, ...manualEvents],
-    [manualEvents]
-  );
-  const calendarEvents = useMemo(
-    () => [...allEvents, ...holidayEvents],
-    [allEvents]
+  useFocusEffect(
+    useCallback(() => {
+      void refreshGoogleEvents();
+    }, [refreshGoogleEvents])
   );
 
   const selectedDateKey = useMemo(
@@ -532,39 +705,46 @@ export default function AgendaScreen() {
 
   const selectedHolidayEvents = useMemo(
     () => holidayEvents.filter((event) => event.date === selectedDateKey),
-    [selectedDateKey]
+    [holidayEvents, selectedDateKey]
   );
 
   const selectedEvents = useMemo(
     () =>
-      allEvents
+      primaryEvents
         .filter((event) => event.date === selectedDateKey)
         .sort((a, b) => (a.time ?? '').localeCompare(b.time ?? '')),
-    [allEvents, selectedDateKey]
+    [primaryEvents, selectedDateKey]
   );
 
-  const radarMessage = useMemo(() => getWeeklyRadarMessage(allEvents), [allEvents]);
+  const radarMessage = useMemo(
+    () =>
+      getSelectedDayRadarMessage({
+        selectedDateKey,
+        selectedEvents,
+        selectedHolidayEvents,
+        upcomingEvents: primaryEvents,
+      }),
+    [primaryEvents, selectedDateKey, selectedEvents, selectedHolidayEvents]
+  );
 
   const upcomingEvents = useMemo(
     () =>
-      allEvents
-        .filter((event) => getDaysUntil(event.date) >= 0)
-        .sort((a, b) => {
-          const dateDiff =
-            parseEventDate(a.date).getTime() - parseEventDate(b.date).getTime();
-
-          if (dateDiff !== 0) {
-            return dateDiff;
-          }
-
-          return (a.time ?? '').localeCompare(b.time ?? '');
-        })
-        .slice(0, 5),
-    [allEvents]
+      primaryEvents
+        .filter(shouldShowInUpcoming)
+        .sort(compareAgendaEventsByDateTime),
+    [primaryEvents]
   );
 
-  const createEvent = async (event: CreateRoxyEventInput) => {
-    const createdEvent = await addEvent(event);
+  const upcomingEventGroups = useMemo(
+    () => groupEventsByDate(upcomingEvents),
+    [upcomingEvents]
+  );
+
+  const createEvent = async (
+    event: CreateRoxyEventInput,
+    options?: { forceLocal?: boolean }
+  ) => {
+    const createdEvent = await addEvent(event, options);
     setSelectedDate(parseEventDate(createdEvent.date));
   };
 
@@ -596,7 +776,7 @@ export default function AgendaScreen() {
     setShowEventForm(true);
   };
 
-  const openEditModal = (event: RoxyEvent) => {
+  const openEditModal = (event: AgendaEvent) => {
     if (!isEditableEvent(event)) {
       return;
     }
@@ -620,19 +800,57 @@ export default function AgendaScreen() {
               <Text style={styles.subtitle}>Veamos qué tenés por delante 💙</Text>
             </View>
 
-            <Pressable
-              style={styles.addEventButton}
-              onPress={openCreateModal}
-            >
-              <Ionicons name="add" size={20} color="#FFFFFF" />
-              <Text style={styles.addEventButtonText}>Agregar evento</Text>
-            </Pressable>
+            <View style={styles.headerActions}>
+              <Pressable
+                disabled={isRefreshingGoogle}
+                accessibilityLabel="Sincronizar Google Calendar"
+                style={[
+                  styles.syncButton,
+                  isRefreshingGoogle && styles.disabledButton,
+                ]}
+                onPress={() => {
+                  void refreshGoogleEvents();
+                }}
+              >
+                <Ionicons
+                  name="refresh"
+                  size={18}
+                  color={isRefreshingGoogle ? '#A1A1AA' : '#F0ABFC'}
+                />
+              </Pressable>
+
+              <Pressable
+                style={styles.addEventButton}
+                onPress={openCreateModal}
+              >
+                <Ionicons name="add" size={20} color="#FFFFFF" />
+                <Text style={styles.addEventButtonText}>Agregar evento</Text>
+              </Pressable>
+            </View>
           </View>
+
+          {googleError || googleLastSync || isRefreshingGoogle ? (
+            <View style={styles.syncStatusRow}>
+              {googleError ? (
+                <Text style={styles.syncErrorText}>
+                  {googleError.includes('reconexion')
+                    ? 'Google Calendar necesita reconexion desde Ajustes.'
+                    : googleError}
+                </Text>
+              ) : (
+                <Text style={styles.syncStatusText}>
+                  {isRefreshingGoogle
+                    ? 'Sincronizando Google Calendar...'
+                    : `Google actualizado ${formatSyncTime(googleLastSync)}`}
+                </Text>
+              )}
+            </View>
+          ) : null}
 
           <View style={[styles.columns, isWideLayout && styles.columnsWide]}>
             <View style={[styles.leftColumn, isWideLayout && styles.leftColumnWide]}>
               <CalendarMonth
-                events={calendarEvents}
+                events={allEvents}
                 selectedDate={selectedDate}
                 onSelectDate={setSelectedDate}
               />
@@ -665,33 +883,17 @@ export default function AgendaScreen() {
                   </Text>
                 ) : null}
 
-                {selectedEvents.length > 0 ? (
-                  selectedEvents.map((event) => (
-                    <EventCard
-                      key={event.id}
-                      event={event}
-                      onPress={
-                        isEditableEvent(event)
-                          ? () => openEditModal(event)
-                          : undefined
-                      }
-                    />
-                  ))
-                ) : (
-                  <View style={styles.emptyCard}>
-                    <View style={styles.emptyIcon}>
-                      <Ionicons name="moon-outline" size={22} color="#C4B5FD" />
-                    </View>
-
-                    <View style={styles.emptyContent}>
-                      <Text style={styles.emptyLabel}>Roxy dice</Text>
-                      <Text style={styles.emptyText}>
-                        Ese día parece tranquilo. Podemos usarlo para respirar un
-                        poco o adelantar algo pendiente.
-                      </Text>
-                    </View>
-                  </View>
-                )}
+                {selectedEvents.map((event) => (
+                  <EventCard
+                    key={event.id}
+                    event={event}
+                    onPress={
+                      isEditableEvent(event)
+                        ? () => openEditModal(event)
+                        : undefined
+                    }
+                  />
+                ))}
               </View>
 
               <View style={styles.section}>
@@ -701,16 +903,24 @@ export default function AgendaScreen() {
                 </Text>
 
                 <View style={styles.upcomingList}>
-                  {upcomingEvents.map((event) => (
-                    <UpcomingEventCard
-                      key={event.id}
-                      event={event}
-                      onPress={
-                        isEditableEvent(event)
-                          ? () => openEditModal(event)
-                          : undefined
-                      }
-                    />
+                  {upcomingEventGroups.map((group) => (
+                    <View key={group.date} style={styles.upcomingDayGroup}>
+                      <Text style={styles.upcomingDayTitle}>
+                        {formatUpcomingGroupLabel(group.date)}
+                      </Text>
+
+                      {group.events.map((event) => (
+                        <UpcomingEventCard
+                          key={event.id}
+                          event={event}
+                          onPress={
+                            isEditableEvent(event)
+                              ? () => openEditModal(event)
+                              : undefined
+                          }
+                        />
+                      ))}
+                    </View>
                   ))}
                 </View>
               </View>
@@ -784,6 +994,36 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: '900',
+  },
+  headerActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 9,
+  },
+  syncButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(22, 16, 34, 0.86)',
+    borderColor: 'rgba(240, 171, 252, 0.26)',
+    borderRadius: 16,
+    borderWidth: 1,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  syncStatusRow: {
+    alignItems: 'flex-start',
+    marginBottom: 14,
+    marginTop: -10,
+  },
+  syncStatusText: {
+    color: '#A78BFA',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  syncErrorText: {
+    color: '#FDA4AF',
+    fontSize: 12,
+    fontWeight: '800',
   },
   columns: {
     gap: 26,
@@ -963,42 +1203,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
   },
-  emptyCard: {
-    alignItems: 'flex-start',
-    backgroundColor: '#161022',
-    borderColor: 'rgba(196, 181, 253, 0.18)',
-    borderRadius: 20,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 12,
-    padding: 16,
-  },
-  emptyIcon: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(139, 92, 246, 0.20)',
-    borderColor: 'rgba(196, 181, 253, 0.24)',
-    borderRadius: 14,
-    borderWidth: 1,
-    height: 42,
-    justifyContent: 'center',
-    width: 42,
-  },
-  emptyContent: {
-    flex: 1,
-    minWidth: 0,
-  },
-  emptyLabel: {
-    color: '#C4B5FD',
-    fontSize: 12,
-    fontWeight: '900',
-    marginBottom: 4,
-    textTransform: 'uppercase',
-  },
-  emptyText: {
-    color: '#D4D4D8',
-    fontSize: 15,
-    lineHeight: 21,
-  },
   upcomingIntro: {
     color: '#C4B5FD',
     fontSize: 14,
@@ -1009,9 +1213,20 @@ const styles = StyleSheet.create({
   upcomingList: {
     gap: 14,
   },
+  upcomingDayGroup: {
+    gap: 9,
+  },
+  upcomingDayTitle: {
+    color: '#F0ABFC',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
   upcomingCard: {
     alignItems: 'center',
     backgroundColor: 'rgba(22, 16, 34, 0.96)',
+    borderColor: 'rgba(255, 255, 255, 0.09)',
     borderRadius: 22,
     borderWidth: 1,
     flexDirection: 'row',
@@ -1020,15 +1235,6 @@ const styles = StyleSheet.create({
     shadowColor: '#8B5CF6',
     shadowOpacity: 0.08,
     shadowRadius: 12,
-  },
-  priorityUpcomingCard: {
-    backgroundColor: 'rgba(22, 16, 34, 0.98)',
-    shadowColor: '#8B5CF6',
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-  },
-  soonUpcomingCard: {
-    backgroundColor: 'rgba(43, 26, 62, 0.88)',
   },
   upcomingDateBox: {
     alignItems: 'center',
@@ -1072,16 +1278,6 @@ const styles = StyleSheet.create({
   upcomingCategory: {
     flex: 1,
     fontSize: 12,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-  },
-  priorityChip: {
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  priorityChipText: {
-    fontSize: 10,
     fontWeight: '900',
     textTransform: 'uppercase',
   },
@@ -1250,6 +1446,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     marginTop: 12,
+  },
+  localFallbackButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(192, 38, 211, 0.10)',
+    borderColor: 'rgba(240, 171, 252, 0.28)',
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    marginTop: 12,
+    minHeight: 46,
+  },
+  localFallbackButtonText: {
+    color: '#F0ABFC',
+    fontSize: 13,
+    fontWeight: '900',
   },
   saveButton: {
     alignItems: 'center',

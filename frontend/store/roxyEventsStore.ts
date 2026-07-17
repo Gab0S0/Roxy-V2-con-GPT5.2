@@ -6,6 +6,10 @@ import {
   RoxyEvent,
   RoxyEventReminder,
 } from '../data/roxyEvents';
+import {
+  cancelEventNotification,
+  rescheduleEventNotification,
+} from '../services/notificationsService';
 
 const STORAGE_KEY = '@roxy/manual_events';
 
@@ -104,7 +108,9 @@ export function useManualRoxyEvents() {
 
   const addEvent = useCallback(
     async (input: CreateRoxyEventInput) => {
-      const nextEvent = normalizeEventInput(input);
+      const nextEvent = await rescheduleEventNotification(
+        normalizeEventInput(input)
+      );
       const nextEvents = [...events, nextEvent];
 
       await persistEvents(nextEvents);
@@ -117,14 +123,18 @@ export function useManualRoxyEvents() {
   const updateEvent = useCallback(
     async (eventId: string, input: UpdateRoxyEventInput) => {
       let updatedEvent: RoxyEvent | undefined;
-      const nextEvents = events.map((event) => {
-        if (event.id !== eventId || event.source !== 'local') {
-          return event;
-        }
+      const nextEvents = await Promise.all(
+        events.map(async (event) => {
+          if (event.id !== eventId || event.source !== 'local') {
+            return event;
+          }
 
-        updatedEvent = normalizeEventUpdate(event, input);
-        return updatedEvent;
-      });
+          updatedEvent = await rescheduleEventNotification(
+            normalizeEventUpdate(event, input)
+          );
+          return updatedEvent;
+        })
+      );
 
       if (!updatedEvent) {
         return undefined;
@@ -147,6 +157,7 @@ export function useManualRoxyEvents() {
         return false;
       }
 
+      await cancelEventNotification(eventToDelete);
       await persistEvents(events.filter((event) => event.id !== eventId));
 
       return true;

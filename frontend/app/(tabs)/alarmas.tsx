@@ -1,116 +1,172 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  Modal,
-  TextInput,
-  Switch,
-  ScrollView,
-  Alert,
-  Platform,
-} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  ListRenderItem,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { format, parseISO, addDays } from 'date-fns';
-import { es } from 'date-fns/locale';
-import DateTimePicker from '@react-native-community/datetimepicker';
+
 import useAlarmasStore from '../../store/alarmasStore';
+import type { RoxyAlarm, RoxyAlarmSound } from '../../types/alarm';
+
+const dayOptions = [
+  { id: 1, label: 'Lun' },
+  { id: 2, label: 'Mar' },
+  { id: 3, label: 'Mie' },
+  { id: 4, label: 'Jue' },
+  { id: 5, label: 'Vie' },
+  { id: 6, label: 'Sab' },
+  { id: 0, label: 'Dom' },
+];
+
+const formatTime = (hour: number, minute: number) =>
+  `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+
+const getRepeatLabel = (repeatDays: number[]) => {
+  if (repeatDays.length === 0) {
+    return 'Una vez';
+  }
+
+  if (repeatDays.length === 7) {
+    return 'Todos los dias';
+  }
+
+  return dayOptions
+    .filter((day) => repeatDays.includes(day.id))
+    .map((day) => day.label)
+    .join(', ');
+};
+
+const getPickerDate = (hour: number, minute: number) => {
+  const date = new Date();
+  date.setHours(hour, minute, 0, 0);
+  return date;
+};
+
+const confirmDelete = (label: string, onConfirm: () => void) => {
+  const message = `Eliminar "${label}"?`;
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    if (window.confirm(message)) {
+      onConfirm();
+    }
+    return;
+  }
+
+  Alert.alert('Eliminar alarma', message, [
+    { text: 'Cancelar', style: 'cancel' },
+    { text: 'Eliminar', style: 'destructive', onPress: onConfirm },
+  ]);
+};
 
 export default function AlarmScreen() {
-  const { alarmas, loadAlarmas, deleteAlarma, toggleAlarma } = useAlarmasStore();
+  const { alarmas, error, isLoading, loadAlarmas, deleteAlarma, toggleAlarma } = useAlarmasStore();
   const [modalVisible, setModalVisible] = useState(false);
-  const [selectedAlarm, setSelectedAlarm] = useState(null);
+  const [selectedAlarm, setSelectedAlarm] = useState<RoxyAlarm | null>(null);
 
   useEffect(() => {
-    loadAlarmas();
-  }, []);
+    void loadAlarmas();
+  }, [loadAlarmas]);
 
-  const handleDeleteAlarm = async (id: string) => {
-    Alert.alert(
-      'Eliminar Alarma',
-      '¿Estás segura de que quieres eliminar esta alarma?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: async () => {
-            await deleteAlarma(id);
-          },
-        },
-      ]
-    );
-  };
+  const sortedAlarmas = useMemo(
+    () => [...alarmas].sort((a, b) => a.hour - b.hour || a.minute - b.minute),
+    [alarmas]
+  );
 
-  const renderAlarmItem = ({ item }) => {
-    const time = format(parseISO(item.datetime), 'HH:mm', { locale: es });
-    const date = format(parseISO(item.datetime), 'dd MMM yyyy', { locale: es });
+  const renderAlarmItem: ListRenderItem<RoxyAlarm> = ({ item }) => (
+    <View style={[styles.alarmCard, !item.enabled && styles.alarmCardDisabled]}>
+      <View style={styles.alarmContent}>
+        <View style={styles.alarmInfo}>
+          <Text style={[styles.alarmTime, !item.enabled && styles.mutedText]}>
+            {formatTime(item.hour, item.minute)}
+          </Text>
+          <Text style={[styles.alarmLabel, !item.enabled && styles.mutedText]}>{item.label}</Text>
 
-    return (
-      <View style={styles.alarmCard}>
-        <View style={styles.alarmContent}>
-          <View style={styles.alarmInfo}>
-            <Text style={styles.alarmTime}>{time}</Text>
-            <Text style={styles.alarmLabel}>{item.label}</Text>
-            <Text style={styles.alarmDate}>{date}</Text>
-            {item.repeatPattern && (
+          <View style={styles.metaRow}>
+            <View style={styles.repeatBadge}>
+              <Ionicons name="repeat" size={13} color="#C026D3" />
+              <Text style={styles.repeatText}>{getRepeatLabel(item.repeatDays)}</Text>
+            </View>
+            <View style={styles.repeatBadge}>
+              <Ionicons name="bed-outline" size={13} color="#8B5CF6" />
+              <Text style={styles.repeatText}>{item.snoozeMinutes} min</Text>
+            </View>
+            {item.vibrate && (
               <View style={styles.repeatBadge}>
-                <Ionicons name="repeat" size={12} color="#4A90E2" />
-                <Text style={styles.repeatText}>
-                  {item.repeatPattern === 'daily' ? 'Diario' : 'Semanal'}
-                </Text>
+                <Ionicons name="phone-portrait-outline" size={13} color="#8B5CF6" />
+                <Text style={styles.repeatText}>Vibra</Text>
               </View>
             )}
           </View>
-
-          <View style={styles.alarmActions}>
-            <Switch
-              value={item.isActive}
-              onValueChange={() => toggleAlarma(item.id)}
-              trackColor={{ false: '#3A3A3C', true: '#4A90E2' }}
-              thumbColor={item.isActive ? '#FFFFFF' : '#8E8E93'}
-            />
-          </View>
         </View>
 
-        <View style={styles.alarmButtons}>
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={() => {
-              setSelectedAlarm(item);
-              setModalVisible(true);
-            }}
-          >
-            <Ionicons name="create-outline" size={20} color="#4A90E2" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={() => handleDeleteAlarm(item.id)}
-          >
-            <Ionicons name="trash-outline" size={20} color="#FF3B30" />
-          </TouchableOpacity>
-        </View>
+        <Switch
+          value={item.enabled}
+          onValueChange={() => void toggleAlarma(item.id)}
+          trackColor={{ false: '#362943', true: '#7C3AED' }}
+          thumbColor={item.enabled ? '#F5D0FE' : '#8B7A99'}
+        />
       </View>
-    );
-  };
+
+      <View style={styles.alarmButtons}>
+        <TouchableOpacity
+          accessibilityLabel="Editar alarma"
+          style={styles.iconButton}
+          onPress={() => {
+            setSelectedAlarm(item);
+            setModalVisible(true);
+          }}
+        >
+          <Ionicons name="create-outline" size={20} color="#C026D3" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityLabel="Eliminar alarma"
+          style={styles.iconButton}
+          onPress={() => confirmDelete(item.label, () => void deleteAlarma(item.id))}
+        >
+          <Ionicons name="trash-outline" size={20} color="#FB7185" />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Alarmas</Text>
+        <Text style={styles.subtitle}>Un recordatorio simple, guardado en este dispositivo.</Text>
+      </View>
+
+      <View style={styles.devNotice}>
+        <Ionicons name="construct-outline" size={16} color="#F0ABFC" />
+        <Text style={styles.devNoticeText}>Motor de alarma Android pendiente de activación.</Text>
+      </View>
+
+      {error && <Text style={styles.errorText}>{error}</Text>}
+
       <View style={styles.content}>
-        {alarmas.length === 0 ? (
+        {sortedAlarmas.length === 0 && !isLoading ? (
           <View style={styles.emptyState}>
-            <Ionicons name="alarm-outline" size={80} color="#3A3A3C" />
-            <Text style={styles.emptyText}>No hay alarmas configuradas</Text>
+            <Ionicons name="alarm-outline" size={68} color="#6B5B78" />
+            <Text style={styles.emptyText}>Todavia no hay alarmas.</Text>
             <Text style={styles.emptySubtext}>
-              Crea una alarma o habla con Roxy para configurarlas 💙
+              Podemos dejar preparada una. El disparo real se conectara en la fase Android.
             </Text>
           </View>
         ) : (
           <FlatList
-            data={alarmas}
+            data={sortedAlarmas}
             renderItem={renderAlarmItem}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.listContent}
@@ -119,6 +175,7 @@ export default function AlarmScreen() {
       </View>
 
       <TouchableOpacity
+        accessibilityLabel="Agregar alarma"
         style={styles.fab}
         onPress={() => {
           setSelectedAlarm(null);
@@ -140,65 +197,88 @@ export default function AlarmScreen() {
   );
 }
 
-function AlarmModal({ visible, alarm, onClose }) {
+interface AlarmModalProps {
+  visible: boolean;
+  alarm: RoxyAlarm | null;
+  onClose: () => void;
+}
+
+function AlarmModal({ visible, alarm, onClose }: AlarmModalProps) {
   const { createAlarma, updateAlarma } = useAlarmasStore();
   const [label, setLabel] = useState('');
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [selectedTime, setSelectedTime] = useState(new Date());
-  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [hour, setHour] = useState(7);
+  const [minute, setMinute] = useState(0);
   const [showTimePicker, setShowTimePicker] = useState(false);
-  const [repeatPattern, setRepeatPattern] = useState('none');
-  const [repeatDays, setRepeatDays] = useState([]);
-
-  const daysOfWeek = [
-    { id: 'monday', label: 'Lun' },
-    { id: 'tuesday', label: 'Mar' },
-    { id: 'wednesday', label: 'Mié' },
-    { id: 'thursday', label: 'Jue' },
-    { id: 'friday', label: 'Vie' },
-    { id: 'saturday', label: 'Sáb' },
-    { id: 'sunday', label: 'Dom' },
-  ];
+  const [repeatDays, setRepeatDays] = useState<number[]>([]);
+  const [snoozeMinutes, setSnoozeMinutes] = useState(5);
+  const [vibrate, setVibrate] = useState(true);
+  const [sound, setSound] = useState<RoxyAlarmSound>('default');
 
   useEffect(() => {
-    if (alarm) {
-      setLabel(alarm.label);
-      const dateObj = parseISO(alarm.datetime);
-      setSelectedDate(dateObj);
-      setSelectedTime(dateObj);
-      setRepeatPattern(alarm.repeatPattern || 'none');
-      setRepeatDays(alarm.repeatDays || []);
-    } else {
-      setLabel('');
-      setSelectedDate(new Date());
-      setSelectedTime(new Date());
-      setRepeatPattern('none');
-      setRepeatDays([]);
-    }
-  }, [alarm, visible]);
-
-  const handleSave = async () => {
-    if (!label.trim()) {
-      Alert.alert('Error', 'Por favor ingresa un nombre para la alarma');
+    if (!visible) {
       return;
     }
 
-    // Combinar fecha y hora
-    const year = selectedDate.getFullYear();
-    const month = selectedDate.getMonth();
-    const day = selectedDate.getDate();
-    const hours = selectedTime.getHours();
-    const minutes = selectedTime.getMinutes();
+    if (alarm) {
+      setLabel(alarm.label);
+      setHour(alarm.hour);
+      setMinute(alarm.minute);
+      setRepeatDays(alarm.repeatDays);
+      setSnoozeMinutes(alarm.snoozeMinutes);
+      setVibrate(alarm.vibrate);
+      setSound(alarm.sound);
+      return;
+    }
 
-    const combinedDate = new Date(year, month, day, hours, minutes);
-    const datetime = combinedDate.toISOString();
+    const now = new Date();
+    setLabel('');
+    setHour(now.getHours());
+    setMinute(now.getMinutes());
+    setRepeatDays([]);
+    setSnoozeMinutes(5);
+    setVibrate(true);
+    setSound('default');
+  }, [alarm, visible]);
+
+  const selectedTime = useMemo(() => getPickerDate(hour, minute), [hour, minute]);
+
+  const toggleDay = (dayId: number) => {
+    setRepeatDays((currentDays) =>
+      currentDays.includes(dayId)
+        ? currentDays.filter((day) => day !== dayId)
+        : [...currentDays, dayId].sort((a, b) => a - b)
+    );
+  };
+
+  const onTimeChange = (event: DateTimePickerEvent, time?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowTimePicker(false);
+    }
+
+    if (event.type === 'dismissed' || !time) {
+      return;
+    }
+
+    setHour(time.getHours());
+    setMinute(time.getMinutes());
+  };
+
+  const handleSave = async () => {
+    const trimmedLabel = label.trim();
+    if (!trimmedLabel) {
+      Alert.alert('Falta un nombre', 'Dale una etiqueta breve a la alarma.');
+      return;
+    }
 
     const alarmData = {
-      label: label.trim(),
-      datetime,
-      repeatPattern: repeatPattern === 'none' ? null : repeatPattern,
-      repeatDays: repeatPattern === 'custom' ? repeatDays : [],
-      sound: 'default',
+      label: trimmedLabel,
+      hour,
+      minute,
+      enabled: alarm?.enabled ?? true,
+      repeatDays,
+      snoozeMinutes,
+      sound,
+      vibrate,
     };
 
     if (alarm) {
@@ -210,162 +290,114 @@ function AlarmModal({ visible, alarm, onClose }) {
     onClose();
   };
 
-  const toggleDay = (dayId) => {
-    if (repeatDays.includes(dayId)) {
-      setRepeatDays(repeatDays.filter((d) => d !== dayId));
-    } else {
-      setRepeatDays([...repeatDays, dayId]);
-    }
-  };
-
-  const onDateChange = (event, date) => {
-    if (Platform.OS === 'android') {
-      setShowDatePicker(false);
-    }
-    if (date && event.type !== 'dismissed') {
-      setSelectedDate(date);
-    }
-    if (Platform.OS === 'android') {
-      setShowDatePicker(false);
-    }
-  };
-
-  const onTimeChange = (event, time) => {
-    if (Platform.OS === 'android') {
-      setShowTimePicker(false);
-    }
-    if (time && event.type !== 'dismissed') {
-      setSelectedTime(time);
-    }
-    if (Platform.OS === 'android') {
-      setShowTimePicker(false);
-    }
-  };
-
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={onClose}
-    >
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>
-              {alarm ? 'Editar Alarma' : 'Nueva Alarma'}
-            </Text>
-            <TouchableOpacity onPress={onClose}>
-              <Ionicons name="close" size={28} color="#8E8E93" />
+            <Text style={styles.modalTitle}>{alarm ? 'Editar alarma' : 'Nueva alarma'}</Text>
+            <TouchableOpacity accessibilityLabel="Cerrar modal" onPress={onClose}>
+              <Ionicons name="close" size={28} color="#B9A7C8" />
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.modalBody}>
-            <Text style={styles.inputLabel}>Nombre</Text>
+          <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+            <Text style={styles.inputLabel}>Etiqueta</Text>
             <TextInput
               style={styles.input}
               value={label}
               onChangeText={setLabel}
-              placeholder="Ej: Gimnasio, Estudiar, Reunión"
-              placeholderTextColor="#3A3A3C"
+              placeholder="Ej: Estudiar, medicacion, gimnasio"
+              placeholderTextColor="#7C6A8C"
             />
 
             <Text style={styles.inputLabel}>Hora</Text>
-            <TouchableOpacity
-              style={styles.pickerButton}
-              onPress={() => setShowTimePicker(true)}
-            >
-              <Ionicons name="time-outline" size={20} color="#4A90E2" />
-              <Text style={styles.pickerButtonText}>
-                {format(selectedTime, 'HH:mm')}
-              </Text>
+            <TouchableOpacity style={styles.pickerButton} onPress={() => setShowTimePicker(true)}>
+              <Ionicons name="time-outline" size={20} color="#C026D3" />
+              <Text style={styles.pickerButtonText}>{formatTime(hour, minute)}</Text>
             </TouchableOpacity>
 
             {showTimePicker && (
               <DateTimePicker
                 value={selectedTime}
                 mode="time"
-                is24Hour={true}
+                is24Hour
                 display="default"
                 onChange={onTimeChange}
               />
             )}
 
-            <Text style={styles.inputLabel}>Fecha</Text>
-            <TouchableOpacity
-              style={styles.pickerButton}
-              onPress={() => setShowDatePicker(true)}
-            >
-              <Ionicons name="calendar-outline" size={20} color="#4A90E2" />
-              <Text style={styles.pickerButtonText}>
-                {format(selectedDate, 'dd MMM yyyy', { locale: es })}
-              </Text>
-            </TouchableOpacity>
+            <Text style={styles.inputLabel}>Repeticion semanal</Text>
+            <Text style={styles.helperText}>
+              Sin dias elegidos queda como alarma unica para la proxima ocurrencia.
+            </Text>
+            <View style={styles.daysContainer}>
+              {dayOptions.map((day) => {
+                const isActive = repeatDays.includes(day.id);
+                return (
+                  <TouchableOpacity
+                    key={day.id}
+                    style={[styles.dayButton, isActive && styles.dayButtonActive]}
+                    onPress={() => toggleDay(day.id)}
+                  >
+                    <Text style={[styles.dayButtonText, isActive && styles.dayButtonTextActive]}>
+                      {day.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
-            {showDatePicker && (
-              <DateTimePicker
-                value={selectedDate}
-                mode="date"
-                display="default"
-                onChange={onDateChange}
-                minimumDate={new Date()}
-              />
-            )}
-
-            <Text style={styles.inputLabel}>Repetir</Text>
-            <View style={styles.repeatOptions}>
-              {['none', 'daily', 'weekly', 'custom'].map((pattern) => (
+            <Text style={styles.inputLabel}>Posponer</Text>
+            <View style={styles.snoozeRow}>
+              {[5, 10, 15].map((minutes) => (
                 <TouchableOpacity
-                  key={pattern}
-                  style={[
-                    styles.repeatOption,
-                    repeatPattern === pattern && styles.repeatOptionActive,
-                  ]}
-                  onPress={() => setRepeatPattern(pattern)}
+                  key={minutes}
+                  style={[styles.snoozeButton, snoozeMinutes === minutes && styles.snoozeButtonActive]}
+                  onPress={() => setSnoozeMinutes(minutes)}
                 >
                   <Text
                     style={[
-                      styles.repeatOptionText,
-                      repeatPattern === pattern &&
-                        styles.repeatOptionTextActive,
+                      styles.snoozeButtonText,
+                      snoozeMinutes === minutes && styles.snoozeButtonTextActive,
                     ]}
                   >
-                    {pattern === 'none'
-                      ? 'No'
-                      : pattern === 'daily'
-                      ? 'Diario'
-                      : pattern === 'weekly'
-                      ? 'Semanal'
-                      : 'Personalizado'}
+                    {minutes} min
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            {repeatPattern === 'custom' && (
-              <View style={styles.daysContainer}>
-                {daysOfWeek.map((day) => (
+            <View style={styles.settingRow}>
+              <View>
+                <Text style={styles.settingTitle}>Vibracion</Text>
+                <Text style={styles.helperText}>Quedara lista para el motor Android.</Text>
+              </View>
+              <Switch
+                value={vibrate}
+                onValueChange={setVibrate}
+                trackColor={{ false: '#362943', true: '#7C3AED' }}
+                thumbColor={vibrate ? '#F5D0FE' : '#8B7A99'}
+              />
+            </View>
+
+            <Text style={styles.inputLabel}>Sonido</Text>
+            <View style={styles.soundRow}>
+              {(['default', 'roxy_theme'] as RoxyAlarmSound[]).map((option) => {
+                const isActive = sound === option;
+                return (
                   <TouchableOpacity
-                    key={day.id}
-                    style={[
-                      styles.dayButton,
-                      repeatDays.includes(day.id) && styles.dayButtonActive,
-                    ]}
-                    onPress={() => toggleDay(day.id)}
+                    key={option}
+                    style={[styles.soundButton, isActive && styles.soundButtonActive]}
+                    onPress={() => setSound(option)}
                   >
-                    <Text
-                      style={[
-                        styles.dayButtonText,
-                        repeatDays.includes(day.id) &&
-                          styles.dayButtonTextActive,
-                      ]}
-                    >
-                      {day.label}
+                    <Text style={[styles.soundButtonText, isActive && styles.soundButtonTextActive]}>
+                      {option === 'default' ? 'Default' : 'Roxy theme'}
                     </Text>
                   </TouchableOpacity>
-                ))}
-              </View>
-            )}
+                );
+              })}
+            </View>
           </ScrollView>
 
           <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
@@ -380,221 +412,322 @@ function AlarmModal({ visible, alarm, onClose }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
+    backgroundColor: '#090714',
+  },
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 10,
+  },
+  title: {
+    color: '#FFFFFF',
+    fontSize: 30,
+    fontWeight: '800',
+  },
+  subtitle: {
+    color: '#B9A7C8',
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 4,
+  },
+  devNotice: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(192, 38, 211, 0.11)',
+    borderColor: 'rgba(192, 38, 211, 0.28)',
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    marginHorizontal: 20,
+    marginBottom: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  devNoticeText: {
+    color: '#F5D0FE',
+    flex: 1,
+    fontSize: 13,
+  },
+  errorText: {
+    color: '#FDA4AF',
+    fontSize: 13,
+    marginHorizontal: 20,
+    marginBottom: 8,
   },
   content: {
     flex: 1,
   },
   listContent: {
-    padding: 16,
+    padding: 20,
+    paddingBottom: 110,
   },
   alarmCard: {
-    backgroundColor: '#1C1C1E',
-    borderRadius: 16,
+    backgroundColor: '#161022',
+    borderRadius: 18,
     padding: 16,
-    marginBottom: 12,
+    marginBottom: 14,
     borderWidth: 1,
-    borderColor: '#2C2C2E',
+    borderColor: 'rgba(192, 38, 211, 0.26)',
+  },
+  alarmCardDisabled: {
+    borderColor: 'rgba(185, 167, 200, 0.12)',
+    opacity: 0.72,
   },
   alarmContent: {
+    alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    gap: 14,
     marginBottom: 12,
   },
   alarmInfo: {
     flex: 1,
   },
   alarmTime: {
-    fontSize: 32,
-    fontWeight: 'bold',
     color: '#FFFFFF',
-    marginBottom: 4,
+    fontSize: 38,
+    fontWeight: '800',
   },
   alarmLabel: {
-    fontSize: 18,
-    color: '#FFFFFF',
-    marginBottom: 4,
+    color: '#F7ECFF',
+    fontSize: 17,
+    fontWeight: '600',
+    marginTop: 2,
   },
-  alarmDate: {
-    fontSize: 14,
-    color: '#8E8E93',
+  mutedText: {
+    color: '#8B7A99',
+  },
+  metaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
   },
   repeatBadge: {
-    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.13)',
+    borderColor: 'rgba(139, 92, 246, 0.22)',
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
   },
   repeatText: {
+    color: '#E9D5FF',
     fontSize: 12,
-    color: '#4A90E2',
-    marginLeft: 4,
-  },
-  alarmActions: {
-    alignItems: 'flex-end',
+    fontWeight: '600',
   },
   alarmButtons: {
+    borderTopColor: 'rgba(255, 255, 255, 0.06)',
+    borderTopWidth: 1,
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    gap: 12,
+    gap: 10,
+    paddingTop: 10,
   },
   iconButton: {
     padding: 8,
   },
   emptyState: {
+    alignItems: 'center',
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
     paddingHorizontal: 32,
   },
   emptyText: {
-    fontSize: 20,
-    fontWeight: '600',
     color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '700',
     marginTop: 16,
     textAlign: 'center',
   },
   emptySubtext: {
+    color: '#B9A7C8',
     fontSize: 14,
-    color: '#8E8E93',
+    lineHeight: 20,
     marginTop: 8,
     textAlign: 'center',
   },
   fab: {
+    alignItems: 'center',
+    backgroundColor: '#C026D3',
+    borderRadius: 32,
+    bottom: 24,
+    elevation: 8,
+    height: 64,
+    justifyContent: 'center',
     position: 'absolute',
     right: 24,
-    bottom: 24,
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#4A90E2',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: '#C026D3',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    width: 64,
   },
   modalOverlay: {
+    backgroundColor: 'rgba(3, 2, 8, 0.78)',
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#1C1C1E',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingTop: 24,
-    paddingHorizontal: 24,
+    backgroundColor: '#161022',
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    maxHeight: '88%',
     paddingBottom: Platform.OS === 'ios' ? 40 : 24,
-    maxHeight: '85%',
+    paddingHorizontal: 22,
+    paddingTop: 22,
   },
   modalHeader: {
+    alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 18,
   },
   modalTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
     color: '#FFFFFF',
+    fontSize: 23,
+    fontWeight: '800',
   },
   modalBody: {
-    marginBottom: 24,
+    marginBottom: 22,
   },
   inputLabel: {
-    fontSize: 16,
-    fontWeight: '600',
     color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
     marginBottom: 8,
     marginTop: 16,
   },
+  helperText: {
+    color: '#A995B8',
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 10,
+  },
   input: {
-    backgroundColor: '#2C2C2E',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    color: '#FFFFFF',
+    backgroundColor: '#21182E',
+    borderColor: 'rgba(185, 167, 200, 0.16)',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#3A3A3C',
+    color: '#FFFFFF',
+    fontSize: 16,
+    padding: 15,
   },
   pickerButton: {
-    backgroundColor: '#2C2C2E',
-    borderRadius: 12,
-    padding: 16,
-    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#21182E',
+    borderColor: 'rgba(192, 38, 211, 0.22)',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#3A3A3C',
+    flexDirection: 'row',
+    padding: 15,
   },
   pickerButtonText: {
-    fontSize: 16,
     color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '700',
     marginLeft: 12,
-  },
-  repeatOptions: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  repeatOption: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    backgroundColor: '#2C2C2E',
-    borderWidth: 1,
-    borderColor: '#3A3A3C',
-  },
-  repeatOptionActive: {
-    backgroundColor: '#4A90E2',
-    borderColor: '#4A90E2',
-  },
-  repeatOptionText: {
-    fontSize: 14,
-    color: '#8E8E93',
-  },
-  repeatOptionTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '600',
   },
   daysContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
-    marginTop: 16,
   },
   dayButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#2C2C2E',
-    justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#21182E',
+    borderColor: 'rgba(185, 167, 200, 0.16)',
+    borderRadius: 22,
     borderWidth: 1,
-    borderColor: '#3A3A3C',
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
   },
   dayButtonActive: {
-    backgroundColor: '#4A90E2',
-    borderColor: '#4A90E2',
+    backgroundColor: 'rgba(192, 38, 211, 0.24)',
+    borderColor: '#C026D3',
   },
   dayButtonText: {
+    color: '#B9A7C8',
     fontSize: 12,
-    color: '#8E8E93',
+    fontWeight: '700',
   },
   dayButtonTextActive: {
     color: '#FFFFFF',
-    fontWeight: '600',
+  },
+  snoozeRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  snoozeButton: {
+    backgroundColor: '#21182E',
+    borderColor: 'rgba(185, 167, 200, 0.16)',
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  snoozeButtonActive: {
+    backgroundColor: 'rgba(139, 92, 246, 0.24)',
+    borderColor: '#8B5CF6',
+  },
+  snoozeButtonText: {
+    color: '#B9A7C8',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  snoozeButtonTextActive: {
+    color: '#FFFFFF',
+  },
+  settingRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 18,
+  },
+  settingTitle: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  soundRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  soundButton: {
+    backgroundColor: '#21182E',
+    borderColor: 'rgba(185, 167, 200, 0.16)',
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  soundButtonActive: {
+    backgroundColor: 'rgba(192, 38, 211, 0.2)',
+    borderColor: '#C026D3',
+  },
+  soundButtonText: {
+    color: '#B9A7C8',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  soundButtonTextActive: {
+    color: '#FFFFFF',
   },
   saveButton: {
-    backgroundColor: '#4A90E2',
-    borderRadius: 16,
-    padding: 18,
     alignItems: 'center',
+    backgroundColor: '#C026D3',
+    borderRadius: 16,
+    padding: 17,
   },
   saveButtonText: {
-    fontSize: 18,
-    fontWeight: 'bold',
     color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '800',
   },
 });
