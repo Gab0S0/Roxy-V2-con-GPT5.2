@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import React, { useEffect, useMemo, useState } from 'react';
+import * as Notifications from 'expo-notifications';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  AppState,
   FlatList,
   ListRenderItem,
   Modal,
@@ -17,6 +19,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import {
+  canScheduleExactAlarms,
+  requestExactAlarmPermission,
+  scheduleTestAlarm,
+} from '../../services/androidAlarmService';
 import useAlarmasStore from '../../store/alarmasStore';
 import type { RoxyAlarm, RoxyAlarmSound } from '../../types/alarm';
 
@@ -74,10 +81,90 @@ export default function AlarmScreen() {
   const { alarmas, error, isLoading, loadAlarmas, deleteAlarma, toggleAlarma } = useAlarmasStore();
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedAlarm, setSelectedAlarm] = useState<RoxyAlarm | null>(null);
+  const [testAlarmStatus, setTestAlarmStatus] = useState<string | null>(null);
+  const [isSchedulingTestAlarm, setIsSchedulingTestAlarm] = useState(false);
+  const waitingForExactAlarmPermission = useRef(false);
 
   useEffect(() => {
     void loadAlarmas();
   }, [loadAlarmas]);
+
+  const programTestAlarm = useCallback(async () => {
+    setIsSchedulingTestAlarm(true);
+    try {
+      const triggerAtMillis = Date.now() + 2 * 60 * 1000;
+      await scheduleTestAlarm(triggerAtMillis);
+      const triggerTime = new Date(triggerAtMillis).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      setTestAlarmStatus(`Alarma de prueba programada para las ${triggerTime}.`);
+    } catch (scheduleError) {
+      console.error('Error scheduling native test alarm:', scheduleError);
+      setTestAlarmStatus('No pude programar la alarma de prueba. Revisa los permisos de Android.');
+    } finally {
+      setIsSchedulingTestAlarm(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' || !waitingForExactAlarmPermission.current) {
+        return;
+      }
+
+      waitingForExactAlarmPermission.current = false;
+      void canScheduleExactAlarms()
+        .then((canSchedule) => {
+          if (canSchedule) {
+            void programTestAlarm();
+            return;
+          }
+          setTestAlarmStatus('Android no concedió el permiso de alarmas exactas.');
+        })
+        .catch((permissionError) => {
+          console.error('Error checking exact alarm permission:', permissionError);
+          setTestAlarmStatus('No pude comprobar el permiso de alarmas exactas.');
+        });
+    });
+
+    return () => subscription.remove();
+  }, [programTestAlarm]);
+
+  const handleTestAlarm = async () => {
+    if (Platform.OS !== 'android') {
+      setTestAlarmStatus('Esta prueba requiere una development build Android.');
+      return;
+    }
+
+    setIsSchedulingTestAlarm(true);
+    setTestAlarmStatus(null);
+    try {
+      let notificationPermission = await Notifications.getPermissionsAsync();
+      if (notificationPermission.status !== 'granted') {
+        notificationPermission = await Notifications.requestPermissionsAsync();
+      }
+
+      if (notificationPermission.status !== 'granted') {
+        setTestAlarmStatus('Hace falta permitir notificaciones para ver la alarma de prueba.');
+        return;
+      }
+
+      if (await canScheduleExactAlarms()) {
+        await programTestAlarm();
+        return;
+      }
+
+      waitingForExactAlarmPermission.current = true;
+      setTestAlarmStatus('Concede el permiso de alarmas exactas en Android.');
+      await requestExactAlarmPermission();
+    } catch (permissionError) {
+      console.error('Error preparing native test alarm:', permissionError);
+      setTestAlarmStatus('No pude abrir o comprobar los permisos de alarma.');
+    } finally {
+      setIsSchedulingTestAlarm(false);
+    }
+  };
 
   const sortedAlarmas = useMemo(
     () => [...alarmas].sort((a, b) => a.hour - b.hour || a.minute - b.minute),
@@ -150,8 +237,21 @@ export default function AlarmScreen() {
 
       <View style={styles.devNotice}>
         <Ionicons name="construct-outline" size={16} color="#F0ABFC" />
-        <Text style={styles.devNoticeText}>Motor de alarma Android pendiente de activación.</Text>
+        <Text style={styles.devNoticeText}>Motor de alarma Android en prueba técnica.</Text>
       </View>
+
+      <TouchableOpacity
+        accessibilityRole="button"
+        disabled={isSchedulingTestAlarm}
+        style={[styles.testButton, isSchedulingTestAlarm && styles.testButtonDisabled]}
+        onPress={() => void handleTestAlarm()}
+      >
+        <Ionicons name="timer-outline" size={18} color="#F5D0FE" />
+        <Text style={styles.testButtonText}>
+          {isSchedulingTestAlarm ? 'Preparando prueba...' : 'Probar alarma en 2 minutos'}
+        </Text>
+      </TouchableOpacity>
+      {testAlarmStatus && <Text style={styles.testAlarmStatus}>{testAlarmStatus}</Text>}
 
       {error && <Text style={styles.errorText}>{error}</Text>}
 
@@ -448,6 +548,33 @@ const styles = StyleSheet.create({
     color: '#F5D0FE',
     flex: 1,
     fontSize: 13,
+  },
+  testButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    borderColor: 'rgba(139, 92, 246, 0.52)',
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    marginHorizontal: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  testButtonDisabled: {
+    opacity: 0.55,
+  },
+  testButtonText: {
+    color: '#F5D0FE',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  testAlarmStatus: {
+    color: '#C4B5FD',
+    fontSize: 12,
+    lineHeight: 17,
+    marginHorizontal: 20,
+    marginTop: 8,
   },
   errorText: {
     color: '#FDA4AF',
