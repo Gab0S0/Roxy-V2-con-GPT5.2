@@ -1,6 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
+import {
+  GoogleOneTapSignIn,
+  isCancelledResponse,
+  isNoSavedCredentialFoundResponse,
+  isSuccessResponse,
+} from 'react-native-nitro-google-signin';
 import { Platform } from 'react-native';
 
 import {
@@ -18,6 +24,16 @@ const GOOGLE_CALENDAR_EVENTS_SCOPE =
   'https://www.googleapis.com/auth/calendar.events';
 const GOOGLE_CALENDAR_LIST_READONLY_SCOPE =
   'https://www.googleapis.com/auth/calendar.calendarlist.readonly';
+const GOOGLE_CALENDAR_SCOPES = [
+  GOOGLE_CALENDAR_EVENTS_SCOPE,
+  GOOGLE_CALENDAR_LIST_READONLY_SCOPE,
+];
+const GOOGLE_WEB_CLIENT_ID =
+  process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '';
+const ROXY_BACKEND_URL = (process.env.EXPO_PUBLIC_BACKEND_URL || '').replace(
+  /\/$/,
+  ''
+);
 const GOOGLE_ACCOUNT_STORAGE_KEY = '@roxy/google_calendar_account';
 const GOOGLE_CONNECTION_ERROR_STORAGE_KEY = '@roxy/google_calendar_error';
 const GOOGLE_COLOR_SYNC_STORAGE_KEY = '@roxy/google_calendar_color_sync';
@@ -28,11 +44,11 @@ const GOOGLE_DISCOVERY = {
 };
 
 export type GoogleAccount = {
+  id?: string;
   email: string;
   name: string;
   picture?: string;
   accessToken: string;
-  refreshToken?: string;
 };
 
 type GoogleUserInfo = {
@@ -136,7 +152,7 @@ export type GoogleCalendarEventInput = {
 
 function getGoogleClientId() {
   if (Platform.OS === 'web') {
-    return process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '';
+    return GOOGLE_WEB_CLIENT_ID;
   }
 
   if (Platform.OS === 'ios') {
@@ -163,6 +179,52 @@ function getGoogleClientId() {
   );
 }
 
+let nativeGoogleConfigured = false;
+
+function configureNativeGoogle() {
+  if (Platform.OS === 'web' || nativeGoogleConfigured || !GOOGLE_WEB_CLIENT_ID) {
+    return;
+  }
+
+  GoogleOneTapSignIn.configure({
+    webClientId: GOOGLE_WEB_CLIENT_ID,
+    scopes: GOOGLE_CALENDAR_SCOPES,
+    offlineAccess: true,
+    autoSelectOnSignIn: false,
+  });
+  nativeGoogleConfigured = true;
+}
+
+async function exchangeServerAuthCode(
+  serverAuthCode: string,
+  idToken: string
+) {
+  if (!ROXY_BACKEND_URL) {
+    throw new Error(
+      'Falta EXPO_PUBLIC_BACKEND_URL para guardar de forma segura el acceso de Google.'
+    );
+  }
+
+  const response = await fetch(`${ROXY_BACKEND_URL}/api/auth/google/exchange`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serverAuthCode, idToken }),
+  });
+
+  if (!response.ok) {
+    let message = 'El backend no pudo completar la autorizacion de Google.';
+    try {
+      const data = await response.json();
+      if (typeof data?.detail === 'string') {
+        message = data.detail;
+      }
+    } catch {
+      // The backend did not return a readable error body.
+    }
+    throw new Error(message);
+  }
+}
+
 function getRedirectUri() {
   return AuthSession.makeRedirectUri({
     path: 'google-calendar',
@@ -170,7 +232,9 @@ function getRedirectUri() {
 }
 
 export function debugRedirectUri() {
-  return getRedirectUri();
+  return Platform.OS === 'web'
+    ? getRedirectUri()
+    : 'No se usa en Android: autenticacion nativa de Google';
 }
 
 function toIsoDateTime(date: Date) {
@@ -295,6 +359,18 @@ async function buildGoogleEventBody(input: GoogleCalendarEventInput) {
 }
 
 async function getGoogleAccessToken() {
+  if (Platform.OS !== 'web') {
+    configureNativeGoogle();
+    const tokens = await GoogleOneTapSignIn.getTokens();
+    const account = await getCurrentGoogleAccount();
+
+    if (account && account.accessToken !== tokens.accessToken) {
+      await saveGoogleAccount({ ...account, accessToken: tokens.accessToken });
+    }
+
+    return tokens.accessToken;
+  }
+
   const account = await getCurrentGoogleAccount();
 
   return account?.accessToken;
@@ -592,8 +668,6 @@ function getUnexpectedAuthStateMessage(result: AuthSession.AuthSessionResult) {
 }
 
 export async function signInWithGoogleCalendar(): Promise<GoogleCalendarAuthResult> {
-  const redirectUri = getRedirectUri();
-  console.log('Google Redirect URI:', redirectUri);
   const clientId = getGoogleClientId();
 
   if (!clientId) {
@@ -610,6 +684,8 @@ export async function signInWithGoogleCalendar(): Promise<GoogleCalendarAuthResu
   }
 
   if (Platform.OS === 'web') {
+    const redirectUri = getRedirectUri();
+    console.log('Google Redirect URI:', redirectUri);
     const request = new AuthSession.AuthRequest({
       clientId,
       redirectUri,
@@ -676,86 +752,50 @@ export async function signInWithGoogleCalendar(): Promise<GoogleCalendarAuthResu
     };
   }
 
-  const request = new AuthSession.AuthRequest({
-    clientId,
-    redirectUri,
-    responseType: AuthSession.ResponseType.Code,
-    scopes: [
-      'openid',
-      'email',
-      'profile',
-      GOOGLE_CALENDAR_EVENTS_SCOPE,
-      GOOGLE_CALENDAR_LIST_READONLY_SCOPE,
-    ],
-    usePKCE: true,
-    extraParams: {
-      access_type: 'offline',
-      include_granted_scopes: 'true',
-      prompt: 'consent',
-    },
-  });
+  configureNativeGoogle();
+  await GoogleOneTapSignIn.checkPlayServices();
 
-  const result = await request.promptAsync(GOOGLE_DISCOVERY);
-
-  if (result.type === 'cancel') {
-    return {
-      status: 'cancelled',
-    };
+  let nativeResult = await GoogleOneTapSignIn.signIn();
+  if (isNoSavedCredentialFoundResponse(nativeResult)) {
+    nativeResult = await GoogleOneTapSignIn.createAccount();
   }
-
-  if (result.type === 'dismiss') {
-    return {
-      status: 'dismissed',
-    };
+  if (isNoSavedCredentialFoundResponse(nativeResult)) {
+    nativeResult = await GoogleOneTapSignIn.presentExplicitSignIn();
   }
-
-  if (result.type === 'error') {
+  if (isCancelledResponse(nativeResult)) {
+    return { status: 'cancelled' };
+  }
+  if (!isSuccessResponse(nativeResult)) {
     return {
       status: 'error',
-      message:
-        result.error?.message ||
-        result.params.error_description ||
-        result.params.error ||
-        'Google devolvio un error durante el inicio de sesion.',
+      message: 'Google no devolvio una cuenta autorizada.',
     };
   }
 
-  if (result.type !== 'success' || !result.params.code) {
-    return {
-      status: 'error',
-      message: `AuthSession termino con estado inesperado: ${result.type}`,
-    };
+  let serverAuthCode = nativeResult.data.serverAuthCode;
+  if (!serverAuthCode) {
+    const authorization = await GoogleOneTapSignIn.requestScopes(
+      GOOGLE_CALENDAR_SCOPES
+    );
+    serverAuthCode = authorization.serverAuthCode;
+  }
+  if (!serverAuthCode) {
+    throw new Error(
+      'Google no devolvio el codigo requerido para habilitar acceso persistente.'
+    );
   }
 
-  const tokenResponse = await AuthSession.exchangeCodeAsync(
-    {
-      clientId,
-      code: result.params.code,
-      redirectUri,
-      extraParams: {
-        code_verifier: request.codeVerifier ?? '',
-      },
-    },
-    GOOGLE_DISCOVERY
-  );
-
-  const userInfoResponse = await fetch(GOOGLE_USER_INFO_URL, {
-    headers: {
-      Authorization: `Bearer ${tokenResponse.accessToken}`,
-    },
-  });
-
-  if (!userInfoResponse.ok) {
-    throw new Error('No se pudo obtener el perfil de Google.');
-  }
-
-  const userInfo = (await userInfoResponse.json()) as GoogleUserInfo;
+  await exchangeServerAuthCode(serverAuthCode, nativeResult.data.idToken);
+  const tokens = await GoogleOneTapSignIn.getTokens();
   const account: GoogleAccount = {
-    email: userInfo.email ?? '',
-    name: userInfo.name ?? userInfo.email ?? 'Cuenta de Google',
-    picture: userInfo.picture,
-    accessToken: tokenResponse.accessToken,
-    refreshToken: tokenResponse.refreshToken,
+    id: nativeResult.data.user.id,
+    email: nativeResult.data.user.email ?? '',
+    name:
+      nativeResult.data.user.name ??
+      nativeResult.data.user.email ??
+      'Cuenta de Google',
+    picture: nativeResult.data.user.photo ?? undefined,
+    accessToken: tokens.accessToken,
   };
 
   await saveGoogleAccount(account);
@@ -769,7 +809,19 @@ export async function signInWithGoogleCalendar(): Promise<GoogleCalendarAuthResu
 export async function signOutGoogleCalendar(): Promise<GoogleCalendarAuthResult> {
   const account = await getCurrentGoogleAccount();
 
-  if (account?.accessToken) {
+  if (Platform.OS !== 'web') {
+    configureNativeGoogle();
+    if (account?.email || account?.id) {
+      try {
+        await GoogleOneTapSignIn.revokeAccess(account.email || account.id || '');
+      } catch (error) {
+        console.warn('No se pudo revocar el acceso nativo de Google.', error);
+      }
+    }
+    await GoogleOneTapSignIn.signOut();
+  }
+
+  if (Platform.OS === 'web' && account?.accessToken) {
     try {
       await AuthSession.revokeAsync(
         {
@@ -822,8 +874,7 @@ export async function fetchGoogleEvents({
   timeMin = getDefaultTimeMin(),
   timeMax = getDefaultTimeMax(),
 }: FetchGoogleEventsOptions = {}) {
-  const account = accessToken ? null : await getCurrentGoogleAccount();
-  const token = accessToken ?? account?.accessToken;
+  const token = accessToken ?? (await getGoogleAccessToken());
 
   if (!token) {
     console.warn(
@@ -1014,8 +1065,7 @@ export async function deleteGoogleEvent(eventId: string, calendarId = 'primary')
 }
 
 export async function fetchGoogleCalendarList(accessToken?: string) {
-  const account = accessToken ? null : await getCurrentGoogleAccount();
-  const token = accessToken ?? account?.accessToken;
+  const token = accessToken ?? (await getGoogleAccessToken());
 
   if (!token) {
     return [];

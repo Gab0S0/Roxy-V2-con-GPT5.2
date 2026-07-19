@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as Notifications from 'expo-notifications';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -53,12 +52,6 @@ const getRepeatLabel = (repeatDays: number[]) => {
     .filter((day) => repeatDays.includes(day.id))
     .map((day) => day.label)
     .join(', ');
-};
-
-const getPickerDate = (hour: number, minute: number) => {
-  const date = new Date();
-  date.setHours(hour, minute, 0, 0);
-  return date;
 };
 
 const confirmDelete = (label: string, onConfirm: () => void) => {
@@ -303,12 +296,125 @@ interface AlarmModalProps {
   onClose: () => void;
 }
 
+interface DigitalTimePickerProps {
+  hour: number;
+  minute: number;
+  onHourChange: (hour: number) => void;
+  onMinuteChange: (minute: number) => void;
+}
+
+function DigitalTimePicker({
+  hour,
+  minute,
+  onHourChange,
+  onMinuteChange,
+}: DigitalTimePickerProps) {
+  const [hourText, setHourText] = useState(hour.toString().padStart(2, '0'));
+  const [minuteText, setMinuteText] = useState(minute.toString().padStart(2, '0'));
+
+  useEffect(() => setHourText(hour.toString().padStart(2, '0')), [hour]);
+  useEffect(() => setMinuteText(minute.toString().padStart(2, '0')), [minute]);
+
+  const commitValue = (
+    text: string,
+    maximum: number,
+    updateText: (value: string) => void,
+    updateValue: (value: number) => void
+  ) => {
+    const parsed = Number.parseInt(text, 10);
+    const value = Number.isNaN(parsed) ? 0 : Math.min(Math.max(parsed, 0), maximum);
+    updateText(value.toString().padStart(2, '0'));
+    updateValue(value);
+  };
+
+  const changeText = (
+    text: string,
+    maximum: number,
+    updateText: (value: string) => void,
+    updateValue: (value: number) => void
+  ) => {
+    const digits = text.replace(/\D/g, '').slice(0, 2);
+    updateText(digits);
+    if (digits.length > 0) {
+      updateValue(Math.min(Number.parseInt(digits, 10), maximum));
+    }
+  };
+
+  const renderTimeColumn = ({
+    label,
+    value,
+    text,
+    maximum,
+    onChange,
+    onTextChange,
+  }: {
+    label: string;
+    value: number;
+    text: string;
+    maximum: number;
+    onChange: (value: number) => void;
+    onTextChange: (value: string) => void;
+  }) => (
+    <View style={styles.timeColumn}>
+      <TouchableOpacity
+        accessibilityLabel={`Aumentar ${label.toLowerCase()}`}
+        style={styles.timeStepButton}
+        onPress={() => onChange((value + 1) % (maximum + 1))}
+      >
+        <Ionicons name="chevron-up" size={24} color="#E879F9" />
+      </TouchableOpacity>
+      <TextInput
+        accessibilityLabel={label}
+        keyboardType="number-pad"
+        maxLength={2}
+        selectTextOnFocus
+        style={styles.timeInput}
+        value={text}
+        onBlur={() => commitValue(text, maximum, onTextChange, onChange)}
+        onChangeText={(nextText) => changeText(nextText, maximum, onTextChange, onChange)}
+      />
+      <TouchableOpacity
+        accessibilityLabel={`Disminuir ${label.toLowerCase()}`}
+        style={styles.timeStepButton}
+        onPress={() => onChange((value - 1 + maximum + 1) % (maximum + 1))}
+      >
+        <Ionicons name="chevron-down" size={24} color="#E879F9" />
+      </TouchableOpacity>
+      <Text style={styles.timeUnitLabel}>{label}</Text>
+    </View>
+  );
+
+  return (
+    <View>
+      <View style={styles.digitalTimePicker}>
+        {renderTimeColumn({
+          label: 'Horas',
+          value: hour,
+          text: hourText,
+          maximum: 23,
+          onChange: onHourChange,
+          onTextChange: setHourText,
+        })}
+        <Text style={styles.timeSeparator}>:</Text>
+        {renderTimeColumn({
+          label: 'Minutos',
+          value: minute,
+          text: minuteText,
+          maximum: 59,
+          onChange: onMinuteChange,
+          onTextChange: setMinuteText,
+        })}
+      </View>
+      <Text style={styles.timeFormatHint}>Formato 24 horas · 00–23 / 00–59</Text>
+    </View>
+  );
+}
+
 function AlarmModal({ visible, alarm, onClose }: AlarmModalProps) {
   const { createAlarma, updateAlarma } = useAlarmasStore();
   const [label, setLabel] = useState('');
   const [hour, setHour] = useState(7);
   const [minute, setMinute] = useState(0);
-  const [showTimePicker, setShowTimePicker] = useState(false);
   const [repeatDays, setRepeatDays] = useState<number[]>([]);
   const [snoozeMinutes, setSnoozeMinutes] = useState(5);
   const [vibrate, setVibrate] = useState(true);
@@ -340,27 +446,12 @@ function AlarmModal({ visible, alarm, onClose }: AlarmModalProps) {
     setSound('default');
   }, [alarm, visible]);
 
-  const selectedTime = useMemo(() => getPickerDate(hour, minute), [hour, minute]);
-
   const toggleDay = (dayId: number) => {
     setRepeatDays((currentDays) =>
       currentDays.includes(dayId)
         ? currentDays.filter((day) => day !== dayId)
         : [...currentDays, dayId].sort((a, b) => a - b)
     );
-  };
-
-  const onTimeChange = (event: DateTimePickerEvent, time?: Date) => {
-    if (Platform.OS === 'android') {
-      setShowTimePicker(false);
-    }
-
-    if (event.type === 'dismissed' || !time) {
-      return;
-    }
-
-    setHour(time.getHours());
-    setMinute(time.getMinutes());
   };
 
   const handleSave = async () => {
@@ -412,20 +503,12 @@ function AlarmModal({ visible, alarm, onClose }: AlarmModalProps) {
             />
 
             <Text style={styles.inputLabel}>Hora</Text>
-            <TouchableOpacity style={styles.pickerButton} onPress={() => setShowTimePicker(true)}>
-              <Ionicons name="time-outline" size={20} color="#C026D3" />
-              <Text style={styles.pickerButtonText}>{formatTime(hour, minute)}</Text>
-            </TouchableOpacity>
-
-            {showTimePicker && (
-              <DateTimePicker
-                value={selectedTime}
-                mode="time"
-                is24Hour
-                display="default"
-                onChange={onTimeChange}
-              />
-            )}
+            <DigitalTimePicker
+              hour={hour}
+              minute={minute}
+              onHourChange={setHour}
+              onMinuteChange={setMinute}
+            />
 
             <Text style={styles.inputLabel}>Repeticion semanal</Text>
             <Text style={styles.helperText}>
@@ -744,20 +827,59 @@ const styles = StyleSheet.create({
     fontSize: 16,
     padding: 15,
   },
-  pickerButton: {
+  digitalTimePicker: {
     alignItems: 'center',
     backgroundColor: '#21182E',
     borderColor: 'rgba(192, 38, 211, 0.22)',
-    borderRadius: 14,
+    borderRadius: 18,
     borderWidth: 1,
     flexDirection: 'row',
-    padding: 15,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
   },
-  pickerButtonText: {
+  timeColumn: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  timeStepButton: {
+    alignItems: 'center',
+    height: 36,
+    justifyContent: 'center',
+    width: '100%',
+  },
+  timeInput: {
+    backgroundColor: '#120D1B',
+    borderColor: 'rgba(232, 121, 249, 0.35)',
+    borderRadius: 14,
+    borderWidth: 1,
     color: '#FFFFFF',
-    fontSize: 17,
+    fontSize: 44,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '800',
+    minWidth: 92,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    textAlign: 'center',
+  },
+  timeSeparator: {
+    color: '#E9D5FF',
+    fontSize: 40,
+    fontWeight: '800',
+    marginHorizontal: 6,
+  },
+  timeUnitLabel: {
+    color: '#A995B8',
+    fontSize: 11,
     fontWeight: '700',
-    marginLeft: 12,
+    marginTop: 4,
+    textTransform: 'uppercase',
+  },
+  timeFormatHint: {
+    color: '#A995B8',
+    fontSize: 12,
+    marginTop: 7,
+    textAlign: 'center',
   },
   daysContainer: {
     flexDirection: 'row',
